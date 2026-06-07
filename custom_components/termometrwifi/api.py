@@ -77,9 +77,13 @@ class TermometrWifiClient:
         """Metadane sterowników (weryfikacja klucza w config flow)."""
         return await self._get("ha/devices")
 
-    async def async_get_state(self) -> dict:
-        """Wszystkie sterowniki + komplet wartości MQTT."""
-        return await self._get("ha/state")
+    async def async_get_state(self, force: bool = False) -> dict:
+        """Wszystkie sterowniki + komplet wartości MQTT.
+
+        force=True → ?refresh=1: backend pomija ~15 s cache i zbiera świeże wartości z brokera
+        (mniejszy lag przy zmianach robionych poza HA, np. w aplikacji).
+        """
+        return await self._get("ha/state?refresh=1" if force else "ha/state")
 
     async def async_get_alarms(self) -> dict:
         """Ostatnie alarmy użytkownika."""
@@ -90,3 +94,7 @@ class TermometrWifiClient:
         return await self._post(
             "ha/command", {"sn": sn, "suffix": suffix, "payload": str(payload)}
         )
+
+    async def async_get_mqtt_credentials(self) -> dict:
+        """Krótkotrwałe poświadczenia MQTT-over-WS (realtime): url + JWT subscribe-only + topics."""
+        return await self._get("ha/mqtt-credentials")

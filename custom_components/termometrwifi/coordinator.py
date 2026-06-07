@@ -6,8 +6,9 @@ import time
 from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import TermometrWifiApiError, TermometrWifiAuthError, TermometrWifiClient
@@ -35,10 +36,12 @@ class TermometrWifiCoordinator(DataUpdateCoordinator):
         )
         self.client = client
         self.entry = entry
+        self._rt_flush_cancel = None
 
     async def _async_update_data(self) -> dict:
         try:
-            state = await self.client.async_get_state()
+            # force=True → świeże zebranie z brokera (mniejszy lag dla zmian spoza HA, np. w aplikacji).
+            state = await self.client.async_get_state(force=True)
             alarms = await self.client.async_get_alarms()
         except TermometrWifiAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
@@ -80,3 +83,23 @@ class TermometrWifiCoordinator(DataUpdateCoordinator):
                 self.async_set_updated_data(self.data)
 
         await self.async_request_refresh()
+
+    @callback
+    def realtime_update(self, sn: str, suffix: str, value: str) -> None:
+        """Wartość z kanału realtime (MQTT-WS) → lokalny stan + odroczone powiadomienie encji."""
+        if not self.data:
+            return
+        dev = self.data.get("devices", {}).get(sn)
+        if not dev:
+            return  # urządzenie pojawi się przy najbliższym pollingu
+        values = dev.setdefault("values", {})
+        actual = resolve_suffix(values, suffix) or suffix
+        values[actual] = {"v": str(value), "ts": int(time.time())}
+        # Debounce: firmware publikuje wiele topików naraz — scalamy w jedno powiadomienie.
+        if self._rt_flush_cancel is None:
+            self._rt_flush_cancel = async_call_later(self.hass, 0.3, self._rt_flush)
+
+    @callback
+    def _rt_flush(self, _now) -> None:
+        self._rt_flush_cancel = None
+        self.async_set_updated_data(self.data)

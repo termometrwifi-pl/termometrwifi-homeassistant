@@ -72,10 +72,20 @@ Komendy idą przez `POST /ha/command` (auth tym samym kluczem API) — backend p
 klient nie dostaje dostępu do brokera. Akcje destrukcyjne (reset WiFi/fabryczny, OTA) są zablokowane
 po stronie serwera. Limit: 30 komend/min na klucz.
 
-## Odpytywanie i limity
+## Realtime (push) i odpytywanie
 
-Domyślny interwał: **30 s** (API: limit 120 zapytań/min na klucz). Polling pobiera `GET /ha/state`
-oraz `GET /ha/alarms` w jednym cyklu.
+Integracja działa **w czasie rzeczywistym**: łączy się z brokerem przez MQTT-over-WebSocket i odbiera
+zmiany od razu (zmiana w aplikacji / na sterowniku jest widoczna w HA i na karcie natychmiast).
+
+- Dodatek **nie trzyma żadnych stałych danych MQTT**. Przy każdym połączeniu pobiera z
+  `GET /ha/mqtt-credentials` (auth kluczem API) **krótkotrwały JWT** (subscribe-only, ACL tylko na
+  Twoje SN-y) oraz adres brokera. Token jest rotowany przed wygaśnięciem (~1 h).
+- Wyciek tokenu pozwala co najwyżej **czytać** telemetrię Twoich urządzeń przez < 1 h — nie pozwala
+  sterować ani sięgnąć cudzych urządzeń. Sterowanie idzie osobno przez `POST /ha/command`.
+- Gdy `paho-mqtt` lub broker są nieosiągalne, integracja po cichu działa dalej na samym **pollingu**.
+
+Polling pozostaje jako **backstop**: domyślnie co **30 s** pobiera `GET /ha/state` + `GET /ha/alarms`
+(API: limit 120 zapytań/min na klucz).
 
 ## Dokumentacja API
 
@@ -84,5 +94,5 @@ w repozytorium głównym.
 
 ## Status
 
-v0.2.0 — odczyt (sensory + alarmy) **oraz sterowanie wędzarnią** (nastawy, program, START/STOP,
-dym/wentylatory/światło) + dedykowana karta Lovelace. Wymaga backendu z endpointem `POST /ha/command`.
+v0.3.0 — odczyt + **sterowanie wędzarnią** + **realtime push** (MQTT-WS z rotowanym JWT) + dedykowana
+karta Lovelace. Wymaga backendu z endpointami `POST /ha/command` i `GET /ha/mqtt-credentials`.

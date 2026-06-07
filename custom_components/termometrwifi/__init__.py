@@ -20,6 +20,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import TermometrWifiCoordinator
+from .realtime import TermometrWifiRealtime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,11 +79,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await _async_register_card(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Realtime push (MQTT-WS). Niepowodzenie nie blokuje setupu — zostaje polling.
+    realtime = TermometrWifiRealtime(hass, client, coordinator)
+    hass.data[DOMAIN][f"{entry.entry_id}_realtime"] = realtime
+    await realtime.async_start()
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Usuwa wpis i jego platformy."""
+    realtime = hass.data[DOMAIN].pop(f"{entry.entry_id}_realtime", None)
+    if realtime:
+        await realtime.async_stop()
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
