@@ -1,12 +1,14 @@
 {
   "domain": "termometrwifi",
   "name": "TermometrWifi",
+  "after_dependencies": ["lovelace"],
   "codeowners": ["@termometrwifi-pl"],
   "config_flow": true,
+  "dependencies": ["http"],
   "documentation": "https://github.com/termometrwifi-pl/termometrwifi-homeassistant",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/termometrwifi-pl/termometrwifi-homeassistant/issues",
   "requirements": ["paho-mqtt"],
-  "version": "0.3.1"
+  "version": "0.3.2"
 }

@@ -94,12 +94,51 @@ async def _async_register_card(hass: HomeAssistant) -> None:
 
     # Cache-busting: token (mtime plików) w query wymusza pobranie świeżego JS po zmianie karty.
     token = await hass.async_add_executor_job(_cache_bust_token)
-    try:
-        add_extra_js_url(hass, f"{CARD_URL}?v={token}")
-    except Exception:  # noqa: BLE001 — rejestracja zasobu nie może wywalić setupu
-        _LOGGER.debug("add_extra_js_url nie powiodło się dla %s", CARD_URL)
+    versioned = f"{CARD_URL}?v={token}"
+
+    # Preferujemy prawdziwy zasób Lovelace (widoczny w UI, niezawodny na aplikacji mobilnej).
+    # Gdy się nie uda (tryb YAML / brak kolekcji) — fallback na add_extra_js_url.
+    registered = await _async_register_lovelace_resource(hass, versioned)
+    if not registered:
+        try:
+            add_extra_js_url(hass, versioned)
+            _LOGGER.info("Karta TermometrWifi załadowana przez add_extra_js_url (%s).", versioned)
+        except Exception:  # noqa: BLE001 — rejestracja zasobu nie może wywalić setupu
+            _LOGGER.warning("Nie udało się zarejestrować zasobu karty: %s", versioned)
 
     hass.data[f"{DOMAIN}_card_registered"] = True
+
+
+async def _async_register_lovelace_resource(hass: HomeAssistant, versioned_url: str) -> bool:
+    """Rejestruje kartę jako zasób Lovelace (res_type=module). True gdy obsłużone.
+
+    Działa tylko w trybie storage (dashboardy zarządzane z UI). W trybie YAML zwraca False —
+    wtedy używamy add_extra_js_url, a użytkownik może dodać zasób ręcznie.
+    """
+    data = hass.data.get("lovelace")
+    resources = getattr(data, "resources", None)
+    if resources is None and isinstance(data, dict):
+        resources = data.get("resources")
+    # ResourceYAMLCollection nie ma async_create_item → brak możliwości zapisu.
+    if resources is None or not hasattr(resources, "async_create_item"):
+        return False
+    try:
+        if not getattr(resources, "loaded", False):
+            await resources.async_load()
+            resources.loaded = True
+        for item in resources.async_items():
+            url = str(item.get("url", ""))
+            if url.split("?")[0].endswith(CARD_FILENAME):
+                if url != versioned_url:  # podbij token przy zmianie pliku
+                    await resources.async_update_item(item["id"], {"url": versioned_url})
+                    _LOGGER.info("Zaktualizowano zasób karty TermometrWifi → %s", versioned_url)
+                return True
+        await resources.async_create_item({"res_type": "module", "url": versioned_url})
+        _LOGGER.info("Dodano zasób Lovelace karty TermometrWifi: %s", versioned_url)
+        return True
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.debug("Rejestracja zasobu Lovelace nie powiodła się: %s", err)
+        return False
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
