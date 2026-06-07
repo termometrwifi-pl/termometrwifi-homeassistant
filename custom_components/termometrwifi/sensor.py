@@ -126,6 +126,14 @@ class SmokerSensor(TermometrWifiSmokerEntity, SensorEntity):
             return round(num / SMOKER_HEATER_WINDOW * 100, 0)
         return num
 
+    @property
+    def extra_state_attributes(self):
+        # Etap: udostępniamy surowy indeks fazy (karta Lovelace rysuje z niego pasek faz).
+        if self._key == "phase":
+            idx = to_number(self._raw())
+            return {"index": int(idx) if idx is not None else None}
+        return None
+
 
 class TermometrWifiSensor(CoordinatorEntity[TermometrWifiCoordinator], SensorEntity):
     """Pojedyncza surowa wartość MQTT (fallback dla urządzeń innych niż wędzarnia)."""

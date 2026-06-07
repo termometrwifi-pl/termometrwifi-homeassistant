@@ -60,9 +60,11 @@ type: custom:termometrwifi-smoker-card
 # device_id: opcjonalnie — domyślnie pierwsza wędzarnia integracji
 ```
 
-Karta sama wyszukuje encje urządzenia (komora/wsad z celami, program, START/STOP, slidery
-dym/wentylatory, światło). Po instalacji może być konieczne **odświeżenie przeglądarki**
-(Ctrl+F5), żeby HA wczytał nowy zasób frontendu.
+Karta odwzorowuje **1:1** wygląd z aplikacji termometrwifi.pl: kafelki komora/wsad (klik = ustaw cel),
+wykres temperatur, pasek faz, postęp, chipy (grzałka/etap), kontrolki START/STOP z kłódką, slidery
+dym/wentylatory (lub przełączniki w trybie ONOFF), światło oraz edytor programu WLASNY (⚙). Sama
+wyszukuje encje urządzenia. Wykres rysuje się na żywo z kolejnych odpytań (rośnie w trakcie sesji).
+Po instalacji może być konieczne **odświeżenie przeglądarki** (Ctrl+F5), żeby HA wczytał nowy zasób.
 
 ## Sterowanie — bezpieczeństwo
 
