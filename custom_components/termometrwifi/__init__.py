@@ -43,8 +43,24 @@ CARD_URL = f"/{DOMAIN}/{CARD_FILENAME}"
 WIDGET_URL = f"/{DOMAIN}/{WIDGET_FILENAME}"
 
 
+def _cache_bust_token() -> str:
+    """Token cache-bustingu = najnowszy mtime plików frontendu.
+
+    Zmienia się automatycznie po każdej edycji karty/widgetu (bez ręcznego bumpowania wersji),
+    a nie zmienia przy zwykłym restarcie — więc przeglądarka pobiera świeży plik tylko gdy trzeba.
+    """
+    base = os.path.join(os.path.dirname(__file__), "www")
+    newest = 0.0
+    for name in (CARD_FILENAME, WIDGET_FILENAME):
+        try:
+            newest = max(newest, os.path.getmtime(os.path.join(base, name)))
+        except OSError:
+            pass
+    return str(int(newest)) if newest else _read_version()
+
+
 def _read_version() -> str:
-    """Wersja integracji z manifestu — używana do cache-bustingu zasobów frontendu."""
+    """Wersja integracji z manifestu (fallback dla cache-bustingu)."""
     try:
         with open(os.path.join(os.path.dirname(__file__), "manifest.json"), encoding="utf-8") as fh:
             return json.load(fh).get("version", "0")
@@ -76,10 +92,10 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         for url, full in paths:
             hass.http.register_static_path(url, full, cache_headers=False)
 
-    # Cache-busting: wersja w query wymusza pobranie świeżego JS po aktualizacji integracji.
-    version = await hass.async_add_executor_job(_read_version)
+    # Cache-busting: token (mtime plików) w query wymusza pobranie świeżego JS po zmianie karty.
+    token = await hass.async_add_executor_job(_cache_bust_token)
     try:
-        add_extra_js_url(hass, f"{CARD_URL}?v={version}")
+        add_extra_js_url(hass, f"{CARD_URL}?v={token}")
     except Exception:  # noqa: BLE001 — rejestracja zasobu nie może wywalić setupu
         _LOGGER.debug("add_extra_js_url nie powiodło się dla %s", CARD_URL)
 

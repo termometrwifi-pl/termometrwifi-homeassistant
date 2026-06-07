@@ -13,7 +13,23 @@
   const SVG_NS = "http://www.w3.org/2000/svg";
   const DOMAIN = "termometrwifi";
   // Bump przy każdej zmianie karty/widgetu — wymusza pobranie świeżego widget-smoker.js (cache-busting).
-  const CARD_VERSION = "0.3.0";
+  const CARD_VERSION = "0.3.1";
+
+  // Widget (tryb modern) i jego modale używają CSS-zmiennych --iot-* (część bez fallbacku).
+  // W HA nikt ich nie definiuje → modale/fullscreen byłyby bez tła. Definiujemy je globalnie
+  // (na :root, bo modale renderują się w document.body poza shadow DOM karty). Paleta = dark z app.
+  function injectGlobalTheme() {
+    if (document.getElementById("twifi-iot-theme")) return;
+    const s = document.createElement("style");
+    s.id = "twifi-iot-theme";
+    s.textContent = `:root{
+      --iot-bg:#0F1115; --iot-bg-2:#14171F; --iot-card:#1A1D24; --iot-card-2:#232730;
+      --iot-border:#2A2F3A; --iot-text:#E6E9F0; --iot-text-dim:#8A92A6;
+      --iot-accent:#6366F1; --iot-accent-2:#818CF8; --iot-success:#10B981;
+      --iot-warn:#F59E0B; --iot-danger:#EF4444;
+    }`;
+    document.head.appendChild(s);
+  }
 
   // Paleta identyczna z aplikacją (dark) — karta wygląda tak samo niezależnie od motywu HA.
   const T = {
@@ -553,12 +569,25 @@
 
     // ════════════════ TRYB MODERN (vendorowany widget z aplikacji) ════════════════
 
+    // Token cache-bustingu — odczytany z URL-a własnego skryptu karty (ten sam mtime-token co w HA),
+    // żeby widget odświeżał się automatycznie razem z kartą. Fallback: CARD_VERSION.
+    _bustToken() {
+      try {
+        const el = document.querySelector('script[src*="/termometrwifi/termometrwifi-smoker-card.js"]');
+        if (el) {
+          const v = new URL(el.src, location.origin).searchParams.get("v");
+          if (v) return v;
+        }
+      } catch (e) {}
+      return CARD_VERSION;
+    }
+
     _loadWidget() {
       if (window.IoTWidgets && window.IoTWidgets.smoker) return Promise.resolve();
       if (window.__twifiWidgetLoading) return window.__twifiWidgetLoading;
       window.__twifiWidgetLoading = new Promise((res, rej) => {
         const s = document.createElement("script");
-        s.src = `/${DOMAIN}/widget-smoker.js?v=${CARD_VERSION}`;
+        s.src = `/${DOMAIN}/widget-smoker.js?v=${this._bustToken()}`;
         s.async = true;
         s.onload = () => res();
         s.onerror = () => rej(new Error("widget load failed"));
@@ -576,6 +605,7 @@
       }
       const Widget = window.IoTWidgets && window.IoTWidgets.smoker;
       if (!Widget) { this._err("Widget smoker niedostępny."); return; }
+      injectGlobalTheme();
       this.shadowRoot.innerHTML = "";
       const host = document.createElement("div");
       this.shadowRoot.appendChild(host);
