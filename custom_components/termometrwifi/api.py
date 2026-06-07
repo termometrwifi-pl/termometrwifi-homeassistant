@@ -50,6 +50,29 @@ class TermometrWifiClient:
         except (aiohttp.ContentTypeError, ValueError) as err:
             raise TermometrWifiApiError(f"Niepoprawny JSON: {err}") from err
 
+    async def _post(self, path: str, body: dict) -> dict:
+        url = f"{self._base}/{path.lstrip('/')}"
+        headers = {**self._headers, "Content-Type": "application/json"}
+        try:
+            async with asyncio.timeout(REQUEST_TIMEOUT):
+                resp = await self._session.post(url, headers=headers, json=body)
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            raise TermometrWifiApiError(f"Błąd połączenia: {err}") from err
+
+        if resp.status in (401, 403):
+            raise TermometrWifiAuthError("Brak uprawnień lub nieprawidłowy klucz API")
+        if resp.status == 429:
+            raise TermometrWifiApiError("Rate limit (429) — zbyt wiele komend")
+        try:
+            data = await resp.json()
+        except (aiohttp.ContentTypeError, ValueError):
+            data = {}
+        if resp.status != 200 or not data.get("ok", False):
+            raise TermometrWifiApiError(
+                f"Komenda odrzucona (HTTP {resp.status}): {data.get('error') or 'błąd'}"
+            )
+        return data
+
     async def async_get_devices(self) -> dict:
         """Metadane sterowników (weryfikacja klucza w config flow)."""
         return await self._get("ha/devices")
@@ -61,3 +84,9 @@ class TermometrWifiClient:
     async def async_get_alarms(self) -> dict:
         """Ostatnie alarmy użytkownika."""
         return await self._get("ha/alarms?limit=100")
+
+    async def async_command(self, sn: str, suffix: str, payload: str) -> dict:
+        """Publikuje komendę sterującą na SN/{suffix} (POST /ha/command)."""
+        return await self._post(
+            "ha/command", {"sn": sn, "suffix": suffix, "payload": str(payload)}
+        )

@@ -1,6 +1,10 @@
 """Integracja TermometrWifi dla Home Assistant."""
 from __future__ import annotations
 
+import logging
+import os
+
+from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -17,7 +21,47 @@ from .const import (
 )
 from .coordinator import TermometrWifiCoordinator
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
+_LOGGER = logging.getLogger(__name__)
+
+PLATFORMS: list[Platform] = [
+    Platform.SENSOR,
+    Platform.BINARY_SENSOR,
+    Platform.NUMBER,
+    Platform.SELECT,
+    Platform.SWITCH,
+    Platform.BUTTON,
+]
+
+# Karta Lovelace dostarczana z integracją — auto-rejestrowana jako zasób frontendu,
+# żeby użytkownik nie musiał ręcznie dodawać URL-a (Ustawienia → Dashboardy → Zasoby).
+CARD_FILENAME = "termometrwifi-smoker-card.js"
+CARD_URL = f"/{DOMAIN}/{CARD_FILENAME}"
+
+
+async def _async_register_card(hass: HomeAssistant) -> None:
+    """Serwuje plik karty pod stałym URL-em i ładuje go na wszystkich dashboardach."""
+    if hass.data.get(f"{DOMAIN}_card_registered"):
+        return
+    card_path = os.path.join(os.path.dirname(__file__), "www", CARD_FILENAME)
+    if not os.path.isfile(card_path):
+        _LOGGER.warning("Nie znaleziono pliku karty: %s", card_path)
+        return
+
+    try:
+        from homeassistant.components.http import StaticPathConfig
+
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(CARD_URL, card_path, cache_headers=False)]
+        )
+    except (ImportError, AttributeError):  # starsze wersje HA
+        hass.http.register_static_path(CARD_URL, card_path, cache_headers=False)
+
+    try:
+        add_extra_js_url(hass, CARD_URL)
+    except Exception:  # noqa: BLE001 — rejestracja zasobu nie może wywalić setupu
+        _LOGGER.debug("add_extra_js_url nie powiodło się dla %s", CARD_URL)
+
+    hass.data[f"{DOMAIN}_card_registered"] = True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -32,6 +76,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    await _async_register_card(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
