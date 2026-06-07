@@ -1,7 +1,11 @@
-/*! TermometrWifi — karta wędzarni dla Home Assistant (wygląd 1:1 z aplikacją termometrwifi.pl).
+/*! TermometrWifi — karta wędzarni dla Home Assistant.
  *  type: custom:termometrwifi-smoker-card
- *  Port widgetu smoker: kafelki, wykres, pasek faz, postęp, chipy, kontrolki + modale.
- *  Dane z encji integracji, sterowanie przez serwisy HA. Bez build-stepu.
+ *  Dwa style (config `style`):
+ *    - "modern"  (domyślny): vendorowany widget z aplikacji (widget-smoker.js) — wygląd 1:1,
+ *                 z wykresem fullscreen, pan/zoom, modalami. Dane z encji → ctx.sse shim.
+ *    - "classic": lekka karta renderowana tutaj, w duchu HA.
+ *  Sterowanie zawsze przez serwisy HA (number/select/switch/button). Bez build-stepu.
+ *  Konfiguracja: { style, device_id, sn, chamber_label, meat_label, unit, accent_color, title }.
  */
 (function () {
   "use strict";
@@ -94,12 +98,18 @@
   class TermometrWifiSmokerCard extends HTMLElement {
     setConfig(config) {
       this._config = config || {};
+      // Styl karty: "modern" (vendorowany widget z aplikacji, 1:1) lub "classic" (lekki, w stylu HA).
+      this._style = String(this._config.style || "modern").toLowerCase();
+      if (this._style === "ha" || this._style === "app") this._style = this._style === "app" ? "modern" : "classic";
+      this._chamberLabel = this._config.chamber_label || "DYM";
+      this._meatLabel = this._config.meat_label || "WSAD";
       this._map = null;
       this._built = false;
       this._resolving = false;
       this.history = [];
       this.MEM_CAP = 600;
       this._runLocked = true;
+      this._last = {};
       this.state = {
         chamberTemp: null, meatTemp: null, targetChamber: 0, targetMeat: 0,
         elapsedMinutes: 0, totalMinutes: 0, currentPhase: 0,
@@ -117,6 +127,7 @@
     set hass(hass) {
       this._hass = hass;
       if (!this._map) { if (!this._resolving) this._resolveEntities(); return; }
+      if (this._style === "modern") { this._dispatchModern(); return; }
       this._syncState();
       if (!this._built) this._build();
       this._renderAll();
@@ -158,7 +169,9 @@
           if (key && KEYS[key]) map[KEYS[key]] = e.entity_id;
         }
         if (map.chamber || map.meat || map.program) {
-          this._map = map; this._syncState(); this._build(); this._renderAll();
+          this._map = map;
+          if (this._style === "modern") this._mountModern();
+          else { this._syncState(); this._build(); this._renderAll(); }
         } else this._err("Urządzenie nie ma encji wędzarni.");
       } catch (e) { this._err("Błąd odczytu rejestru encji."); }
       finally { this._resolving = false; }
@@ -251,8 +264,8 @@
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                 <span style="font-size:10px;color:${T.text1};text-transform:uppercase;letter-spacing:.05em;">Przebieg temperatury</span>
                 <div style="display:flex;gap:10px;">
-                  <div style="display:flex;align-items:center;gap:4px;"><svg width="12" height="3"><line x1="0" y1="1.5" x2="12" y2="1.5" stroke="${accent}" stroke-width="2"/></svg><span style="font-size:9px;color:${T.text1};">Komora</span></div>
-                  <div style="display:flex;align-items:center;gap:4px;"><svg width="12" height="3"><line x1="0" y1="1.5" x2="12" y2="1.5" stroke="${T.amber}" stroke-width="2" stroke-dasharray="4,3"/></svg><span style="font-size:9px;color:${T.text1};">Wsad</span></div>
+                  <div style="display:flex;align-items:center;gap:4px;"><svg width="12" height="3"><line x1="0" y1="1.5" x2="12" y2="1.5" stroke="${accent}" stroke-width="2"/></svg><span style="font-size:9px;color:${T.text1};">${esc(this._chamberLabel)}</span></div>
+                  <div style="display:flex;align-items:center;gap:4px;"><svg width="12" height="3"><line x1="0" y1="1.5" x2="12" y2="1.5" stroke="${T.amber}" stroke-width="2" stroke-dasharray="4,3"/></svg><span style="font-size:9px;color:${T.text1};">${esc(this._meatLabel)}</span></div>
                 </div>
               </div>
               <div data-slot="chart" style="height:clamp(70px,16vh,200px);"></div>
@@ -330,9 +343,9 @@
     _renderTiles() {
       const accent = T.green, off = !this.state.online;
       const tiles = [
-        { edit: "chamber", label: "KOMORA", value: off ? null : this.state.chamberTemp, target: off ? 0 : this.state.targetChamber, color: accent,
+        { edit: "chamber", label: this._chamberLabel, value: off ? null : this.state.chamberTemp, target: off ? 0 : this.state.targetChamber, color: accent,
           ok: !off && this.state.chamberTemp != null && Math.abs(this.state.chamberTemp - this.state.targetChamber) < 8 },
-        { edit: "meat", label: "SONDA", value: off ? null : this.state.meatTemp, target: off ? 0 : this.state.targetMeat, color: T.amber,
+        { edit: "meat", label: this._meatLabel, value: off ? null : this.state.meatTemp, target: off ? 0 : this.state.targetMeat, color: T.amber,
           ok: !off && this.state.meatTemp != null && this.state.meatTemp >= this.state.targetMeat * 0.9 },
       ];
       const canEdit = !off;
@@ -535,6 +548,153 @@
         close();
       });
     }
+
+    // ════════════════ TRYB MODERN (vendorowany widget z aplikacji) ════════════════
+
+    _loadWidget() {
+      if (window.IoTWidgets && window.IoTWidgets.smoker) return Promise.resolve();
+      if (window.__twifiWidgetLoading) return window.__twifiWidgetLoading;
+      window.__twifiWidgetLoading = new Promise((res, rej) => {
+        const s = document.createElement("script");
+        s.src = `/${DOMAIN}/widget-smoker.js`;
+        s.async = true;
+        s.onload = () => res();
+        s.onerror = () => rej(new Error("widget load failed"));
+        document.head.appendChild(s);
+      });
+      return window.__twifiWidgetLoading;
+    }
+
+    async _mountModern() {
+      try {
+        await this._loadWidget();
+      } catch (e) {
+        this._err("Nie udało się wczytać widgetu (modern). Sprawdź zasób /termometrwifi/widget-smoker.js.");
+        return;
+      }
+      const Widget = window.IoTWidgets && window.IoTWidgets.smoker;
+      if (!Widget) { this._err("Widget smoker niedostępny."); return; }
+      this.shadowRoot.innerHTML = "";
+      const host = document.createElement("div");
+      this.shadowRoot.appendChild(host);
+      this._subs = {};
+      this._widget = new Widget(this._cfgModern(), this._ctxShim());
+      this._widget.mount(host);
+      this._dispatchModern(true);
+    }
+
+    _cfgModern() {
+      return {
+        id: "ha_" + (this._sn || "smoker"),
+        label: this._deviceName, device_name: this._deviceName,
+        chamber_label: this._chamberLabel, meat_label: this._meatLabel,
+        unit: this._config.unit || "°C",
+        accent_color: this._config.accent_color || "#10B981",
+        time_unit_seconds: true,
+        // PUB (odczyt)
+        chamber_temp_topic_suffix: "PUB/T/tDym", meat_temp_topic_suffix: "PUB/T/tWsad",
+        target_chamber_topic_suffix: "PUB/TDM", target_meat_topic_suffix: "PUB/TWM",
+        elapsed_topic_suffix: "PUB/elapsed", total_topic_suffix: "PUB/total",
+        phase_topic_suffix: "PUB/AKTUAL", heater_topic_suffix: "PUB/output",
+        fan1_topic_suffix: "PUB/FAN1", fan2_topic_suffix: "PUB/FAN2", dym_topic_suffix: "PUB/DYM",
+        light_topic_suffix: "PUB/LED", ctrl_topic_suffix: "PUB/CTRL",
+        program_topic_suffix: "PUB/PROG", recipe_topic_suffix: "PUB/przepis",
+        stat_topic_suffix: "PUB/STAT", czas_topic_suffix: "PUB/Czas", wifi_rssi_topic_suffix: "PUB/signal",
+        // SUB (zapis)
+        fan1_sub_topic_suffix: "SUB/FAN1", fan2_sub_topic_suffix: "SUB/FAN2", dym_sub_topic_suffix: "SUB/DYM",
+        light_sub_topic_suffix: "SUB/LED", stat_sub_topic_suffix: "SUB/STAT",
+        program_sub_topic_suffix: "SUB/PROG", tdm_sub_topic_suffix: "SUB/TDM",
+        twm_sub_topic_suffix: "SUB/TWM", czas_sub_topic_suffix: "SUB/Czas",
+        // parametry programu WLASNY (pub/sub)
+        prog_dripping_pub_topic_suffix: "PUB/ocCW", prog_dripping_sub_topic_suffix: "SUB/ocCW",
+        prog_drying_pub_topic_suffix: "PUB/osCW", prog_drying_sub_topic_suffix: "SUB/osCW",
+        prog_smoking_pub_topic_suffix: "PUB/wCW", prog_smoking_sub_topic_suffix: "SUB/wCW",
+        prog_baking_pub_topic_suffix: "PUB/pCW", prog_baking_sub_topic_suffix: "SUB/pCW",
+        prog_heat_temp_pub_topic_suffix: "PUB/tRW", prog_heat_temp_sub_topic_suffix: "SUB/tRW",
+        prog_dry_temp_pub_topic_suffix: "PUB/tSW", prog_dry_temp_sub_topic_suffix: "SUB/tSW",
+        prog_smoke_temp_pub_topic_suffix: "PUB/tWW", prog_smoke_temp_sub_topic_suffix: "SUB/tWW",
+        prog_bake_temp_pub_topic_suffix: "PUB/tPW", prog_bake_temp_sub_topic_suffix: "SUB/tPW",
+        prog_meat_max_pub_topic_suffix: "PUB/tWMW", prog_meat_max_sub_topic_suffix: "SUB/tWMW",
+      };
+    }
+
+    _ctxShim() {
+      const self = this;
+      return {
+        sn: this._sn,
+        sse: {
+          on(topic, cb) { (self._subs[topic] = self._subs[topic] || []).push(cb); },
+          publish(topic, payload) { return self._publishModern(topic, payload); },
+        },
+      };
+    }
+
+    _modernSources() {
+      return [
+        ["PUB/T/tDym", "chamber"], ["PUB/T/tWsad", "meat"],
+        ["PUB/TDM", "target_chamber"], ["PUB/TWM", "target_meat"],
+        ["PUB/elapsed", "elapsed"], ["PUB/total", "total"],
+        ["PUB/AKTUAL", "phase"], ["PUB/output", "heater"],
+        ["PUB/FAN1", "fan1"], ["PUB/FAN2", "fan2"], ["PUB/DYM", "dym"],
+        ["PUB/LED", "light"], ["PUB/CTRL", "ctrl"], ["PUB/PROG", "program"],
+        ["PUB/przepis", "recipe"], ["PUB/STAT", "status"], ["PUB/Czas", "clock"],
+        ["PUB/signal", "rssi"],
+        ["PUB/ocCW", "w_dripping"], ["PUB/osCW", "w_drying"], ["PUB/wCW", "w_smoking"],
+        ["PUB/pCW", "w_baking"], ["PUB/tRW", "w_heat"], ["PUB/tSW", "w_dry"],
+        ["PUB/tWW", "w_smoke"], ["PUB/tPW", "w_bake"], ["PUB/tWMW", "w_meat_max"],
+      ];
+    }
+
+    /** Pcha bieżące wartości encji do widgetu jako "wiadomości MQTT". */
+    _dispatchModern(force) {
+      if (!this._widget || !this._subs) return;
+      const sn = this._sn;
+      const fire = (topic, val) => {
+        if (val == null) return;
+        if (!force && this._last[topic] === val) return;
+        this._last[topic] = val;
+        (this._subs[topic] || []).forEach((cb) => { try { cb(val); } catch (e) {} });
+      };
+      const chamberS = this._stateObj("chamber");
+      const online = !(!chamberS || chamberS.state === "unavailable" || chamberS.state === "unknown");
+      fire(sn + "/status", online ? "online" : "offline");
+      for (const [suf, key] of this._modernSources()) {
+        const s = this._stateObj(key);
+        if (!s) continue;
+        let v;
+        if (key === "phase") v = (s.attributes && s.attributes.index != null) ? String(s.attributes.index) : String(s.state);
+        else if (key === "light") v = s.state === "on" ? "1" : "0";
+        else v = String(s.state);
+        if (v === "unavailable" || v === "unknown") continue;
+        fire(sn + "/" + suf, v);
+      }
+    }
+
+    /** Publikacja z widgetu (SUB/*) → serwis HA. Zwraca Promise (widget bywa await). */
+    _publishModern(topic, payload) {
+      const sn = this._sn;
+      let suffix = topic;
+      if (sn && topic.indexOf(sn + "/") === 0) suffix = topic.slice(sn.length + 1);
+      const p = String(payload);
+      const n = parseFloat(p.replace(",", "."));
+      const call = (d, s, data) => this._hass.callService(d, s, data);
+      const setN = (key, val) => { const id = this._id(key); return id ? call("number", "set_value", { entity_id: id, value: val }) : Promise.resolve(); };
+      const map = {
+        "SUB/TDM": () => setN("target_chamber", n), "SUB/TWM": () => setN("target_meat", n),
+        "SUB/DYM": () => setN("dym", Math.round(n)), "SUB/FAN1": () => setN("fan1", Math.round(n)), "SUB/FAN2": () => setN("fan2", Math.round(n)),
+        "SUB/LED": () => { const id = this._id("light"); return id ? call("switch", n > 0 ? "turn_on" : "turn_off", { entity_id: id }) : Promise.resolve(); },
+        "SUB/PROG": () => { const id = this._id("program"); return id ? call("select", "select_option", { entity_id: id, option: p.toUpperCase() }) : Promise.resolve(); },
+        "SUB/STAT": () => { const id = this._id(/^start$/i.test(p) ? "start" : "stop"); return id ? call("button", "press", { entity_id: id }) : Promise.resolve(); },
+        "SUB/ocCW": () => setN("w_dripping", Math.round(n)), "SUB/osCW": () => setN("w_drying", Math.round(n)),
+        "SUB/wCW": () => setN("w_smoking", Math.round(n)), "SUB/pCW": () => setN("w_baking", Math.round(n)),
+        "SUB/tRW": () => setN("w_heat", n), "SUB/tSW": () => setN("w_dry", n), "SUB/tWW": () => setN("w_smoke", n),
+        "SUB/tPW": () => setN("w_bake", n), "SUB/tWMW": () => setN("w_meat_max", n),
+      };
+      const fn = map[suffix];
+      if (fn) return Promise.resolve(fn());
+      // np. SUB/Czas — brak odpowiedniej encji; nie blokujemy UI widgetu
+      return Promise.resolve();
+    }
   }
 
   if (!customElements.get("termometrwifi-smoker-card"))
@@ -543,7 +703,7 @@
   window.customCards.push({
     type: "termometrwifi-smoker-card",
     name: "TermometrWifi — Wędzarnia",
-    description: "Karta wędzarni 1:1 jak w aplikacji (komora/wsad, wykres, program, START/STOP, dym, wentylatory, światło).",
+    description: "Karta wędzarni. Styl: 'modern' (1:1 widget z aplikacji) lub 'classic' (lekki, w stylu HA). Opcje: style, chamber_label, meat_label, device_id.",
     preview: false,
   });
   console.info("%c TERMOMETRWIFI-SMOKER-CARD ", "background:#10B981;color:#fff;border-radius:3px");

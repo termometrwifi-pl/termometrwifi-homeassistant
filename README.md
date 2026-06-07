@@ -57,8 +57,16 @@ Integracja sama rejestruje kartę — wystarczy dodać ją do dashboardu:
 
 ```yaml
 type: custom:termometrwifi-smoker-card
+style: modern          # "modern" (domyślny, 1:1 widget z aplikacji) lub "classic" (lekki, w stylu HA)
+chamber_label: DYM     # etykieta kafelka komory (domyślnie DYM)
+meat_label: WSAD       # etykieta kafelka wsadu (domyślnie WSAD)
 # device_id: opcjonalnie — domyślnie pierwsza wędzarnia integracji
 ```
+
+**Dwa style do wyboru:**
+- `modern` — vendorowany oryginalny widget z aplikacji (`widget-smoker.js`): wygląd 1:1, wykres
+  pełnoekranowy z pan/zoom i tooltipem, modale, edytor programu WLASNY.
+- `classic` — lekka karta renderowana w HA (mniej zależności, ten sam zakres sterowania).
 
 Karta odwzorowuje **1:1** wygląd z aplikacji termometrwifi.pl: kafelki komora/wsad (klik = ustaw cel),
 wykres temperatur, pasek faz, postęp, chipy (grzałka/etap), kontrolki START/STOP z kłódką, slidery

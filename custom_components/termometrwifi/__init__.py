@@ -33,30 +33,40 @@ PLATFORMS: list[Platform] = [
     Platform.BUTTON,
 ]
 
-# Karta Lovelace dostarczana z integracją — auto-rejestrowana jako zasób frontendu,
-# żeby użytkownik nie musiał ręcznie dodawać URL-a (Ustawienia → Dashboardy → Zasoby).
+# Pliki frontendu serwowane z integracji (auto-rejestrowane jako zasoby — bez ręcznego dodawania URL):
+#  - karta Lovelace (ładowana na wszystkich dashboardach),
+#  - vendorowany widget z aplikacji (styl "modern"; kartę doładowuje sama na żądanie).
 CARD_FILENAME = "termometrwifi-smoker-card.js"
+WIDGET_FILENAME = "widget-smoker.js"
 CARD_URL = f"/{DOMAIN}/{CARD_FILENAME}"
+WIDGET_URL = f"/{DOMAIN}/{WIDGET_FILENAME}"
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:
-    """Serwuje plik karty pod stałym URL-em i ładuje go na wszystkich dashboardach."""
+    """Serwuje pliki karty + widgetu i ładuje kartę na wszystkich dashboardach."""
     if hass.data.get(f"{DOMAIN}_card_registered"):
         return
-    card_path = os.path.join(os.path.dirname(__file__), "www", CARD_FILENAME)
-    if not os.path.isfile(card_path):
-        _LOGGER.warning("Nie znaleziono pliku karty: %s", card_path)
-        return
+    base = os.path.join(os.path.dirname(__file__), "www")
+    files = [(CARD_URL, CARD_FILENAME), (WIDGET_URL, WIDGET_FILENAME)]
+    paths = []
+    for url, name in files:
+        full = os.path.join(base, name)
+        if not os.path.isfile(full):
+            _LOGGER.warning("Nie znaleziono pliku frontendu: %s", full)
+            continue
+        paths.append((url, full))
 
     try:
         from homeassistant.components.http import StaticPathConfig
 
         await hass.http.async_register_static_paths(
-            [StaticPathConfig(CARD_URL, card_path, cache_headers=False)]
+            [StaticPathConfig(url, full, cache_headers=False) for url, full in paths]
         )
     except (ImportError, AttributeError):  # starsze wersje HA
-        hass.http.register_static_path(CARD_URL, card_path, cache_headers=False)
+        for url, full in paths:
+            hass.http.register_static_path(url, full, cache_headers=False)
 
+    # Ładujemy tylko kartę — widget doładowuje się dynamicznie w trybie "modern".
     try:
         add_extra_js_url(hass, CARD_URL)
     except Exception:  # noqa: BLE001 — rejestracja zasobu nie może wywalić setupu
