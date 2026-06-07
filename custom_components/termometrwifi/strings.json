@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "TermometrWifi",
+        "description": "Podaj adres API i klucz wygenerowany w aplikacji (Ustawienia → Home Assistant).",
+        "data": {
+          "base_url": "Adres API",
+          "api_key": "Klucz API"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Nie można połączyć się z API. Sprawdź adres.",
+      "invalid_auth": "Nieprawidłowy lub odwołany klucz API."
+    },
+    "abort": {
+      "already_configured": "Ten klucz API jest już skonfigurowany."
+    }
+  }
+}
