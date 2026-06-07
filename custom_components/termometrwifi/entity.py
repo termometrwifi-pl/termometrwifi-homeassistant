@@ -1,6 +1,7 @@
 """Wspólne helpery encji TermometrWifi."""
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 from homeassistant.helpers.entity import DeviceInfo
@@ -82,6 +83,34 @@ def is_smoker(values: dict) -> bool:
     return any(resolve_suffix(values, m) is not None for m in SMOKER_MARKER_SUFFIXES)
 
 
+def _raw_value(values: dict, suffix: str):
+    key = resolve_suffix(values, suffix)
+    if key is None:
+        return None
+    entry = values.get(key)
+    return entry.get("v") if isinstance(entry, dict) else None
+
+
+def device_online(values: dict) -> bool:
+    """Czy sterownik jest online.
+
+    MQTT jest retained → po rozłączeniu zostają nieaktualne wartości. Obecność wykrywamy z LWT:
+    firmware ustawia Last Will na PUB/Czas = "OFF LINE" (retained). Dodatkowo honorujemy topic
+    `status` (online/offline/1/0), jeśli kiedyś się pojawi. Brak sygnału = zakładamy online.
+    """
+    status = _raw_value(values, "status")
+    if status is not None:
+        s = str(status).strip().lower()
+        if s in ("offline", "off line", "off", "0", "false"):
+            return False
+        if s in ("online", "on", "1", "true"):
+            return True
+    czas = _raw_value(values, "PUB/Czas")
+    if czas is not None and re.search(r"off\s*line", str(czas), re.IGNORECASE):
+        return False
+    return True
+
+
 class TermometrWifiSmokerEntity(CoordinatorEntity):
     """Baza encji wędzarni — wspólne device_info, dostęp do wartości i publikacja komend."""
 
@@ -115,6 +144,9 @@ class TermometrWifiSmokerEntity(CoordinatorEntity):
     @property
     def available(self) -> bool:
         if not super().available:
+            return False
+        # Offline (LWT) → encje wędzarni niedostępne, żeby nie pokazywać starych retained wartości.
+        if not device_online(self._values()):
             return False
         if self._read_suffix is None:
             return True
