@@ -12,6 +12,8 @@
 
   const SVG_NS = "http://www.w3.org/2000/svg";
   const DOMAIN = "termometrwifi";
+  // Bump przy każdej zmianie karty/widgetu — wymusza pobranie świeżego widget-smoker.js (cache-busting).
+  const CARD_VERSION = "0.3.0";
 
   // Paleta identyczna z aplikacją (dark) — karta wygląda tak samo niezależnie od motywu HA.
   const T = {
@@ -556,7 +558,7 @@
       if (window.__twifiWidgetLoading) return window.__twifiWidgetLoading;
       window.__twifiWidgetLoading = new Promise((res, rej) => {
         const s = document.createElement("script");
-        s.src = `/${DOMAIN}/widget-smoker.js`;
+        s.src = `/${DOMAIN}/widget-smoker.js?v=${CARD_VERSION}`;
         s.async = true;
         s.onload = () => res();
         s.onerror = () => rej(new Error("widget load failed"));

@@ -1,6 +1,7 @@
 """Integracja TermometrWifi dla Home Assistant."""
 from __future__ import annotations
 
+import json
 import logging
 import os
 
@@ -42,6 +43,15 @@ CARD_URL = f"/{DOMAIN}/{CARD_FILENAME}"
 WIDGET_URL = f"/{DOMAIN}/{WIDGET_FILENAME}"
 
 
+def _read_version() -> str:
+    """Wersja integracji z manifestu — używana do cache-bustingu zasobów frontendu."""
+    try:
+        with open(os.path.join(os.path.dirname(__file__), "manifest.json"), encoding="utf-8") as fh:
+            return json.load(fh).get("version", "0")
+    except (OSError, ValueError):
+        return "0"
+
+
 async def _async_register_card(hass: HomeAssistant) -> None:
     """Serwuje pliki karty + widgetu i ładuje kartę na wszystkich dashboardach."""
     if hass.data.get(f"{DOMAIN}_card_registered"):
@@ -66,9 +76,10 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         for url, full in paths:
             hass.http.register_static_path(url, full, cache_headers=False)
 
-    # Ładujemy tylko kartę — widget doładowuje się dynamicznie w trybie "modern".
+    # Cache-busting: wersja w query wymusza pobranie świeżego JS po aktualizacji integracji.
+    version = await hass.async_add_executor_job(_read_version)
     try:
-        add_extra_js_url(hass, CARD_URL)
+        add_extra_js_url(hass, f"{CARD_URL}?v={version}")
     except Exception:  # noqa: BLE001 — rejestracja zasobu nie może wywalić setupu
         _LOGGER.debug("add_extra_js_url nie powiodło się dla %s", CARD_URL)
 
