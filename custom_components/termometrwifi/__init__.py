@@ -22,6 +22,8 @@ from .const import (
 )
 from .coordinator import TermometrWifiCoordinator
 from .realtime import TermometrWifiRealtime
+from .services import async_setup_services, async_unload_services
+from .weather import WeatherPusher
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,6 +34,7 @@ PLATFORMS: list[Platform] = [
     Platform.SELECT,
     Platform.SWITCH,
     Platform.BUTTON,
+    Platform.IMAGE,
 ]
 
 # Pliki frontendu serwowane z integracji (auto-rejestrowane jako zasoby — bez ręcznego dodawania URL):
@@ -156,11 +159,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await _async_register_card(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # Usługi (upload zdjęcia do AI, masa/ilość) — raz globalnie.
+    await async_setup_services(hass)
+
     # Realtime push (MQTT-WS). Niepowodzenie nie blokuje setupu — zostaje polling.
     realtime = TermometrWifiRealtime(hass, client, coordinator)
     hass.data[DOMAIN][f"{entry.entry_id}_realtime"] = realtime
     await realtime.async_start()
+
+    # Push lokalnej pogody (HA → APP) — działa tylko gdy wskazano encje w opcjach.
+    pusher = WeatherPusher(hass, entry, client)
+    hass.data[DOMAIN][f"{entry.entry_id}_weather"] = pusher
+    await pusher.async_start()
+
+    # Zmiana opcji (encje pogody / interwał) → przeładuj wpis.
+    entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     return True
+
+
+async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -168,7 +186,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     realtime = hass.data[DOMAIN].pop(f"{entry.entry_id}_realtime", None)
     if realtime:
         await realtime.async_stop()
+    pusher = hass.data[DOMAIN].pop(f"{entry.entry_id}_weather", None)
+    if pusher:
+        pusher.async_stop()
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
+        async_unload_services(hass)
     return unload_ok

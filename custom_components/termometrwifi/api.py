@@ -98,3 +98,54 @@ class TermometrWifiClient:
     async def async_get_mqtt_credentials(self) -> dict:
         """Krótkotrwałe poświadczenia MQTT-over-WS (realtime): url + JWT subscribe-only + topics."""
         return await self._get("ha/mqtt-credentials")
+
+    async def async_get_runs(self, limit: int = 8) -> dict:
+        """Ostatnie cykle (recipe-runs) urządzeń: analiza AI, flagi zdjęć, masa/ilość wsadu."""
+        return await self._get(f"ha/runs?limit={int(limit)}")
+
+    async def async_get_run_photo(self, run_id: int, which: str) -> bytes | None:
+        """Pobiera bajty zdjęcia cyklu (which=start|product). None gdy brak."""
+        url = f"{self._base}/ha/runs/{int(run_id)}/photo?which={which}"
+        try:
+            async with asyncio.timeout(REQUEST_TIMEOUT):
+                resp = await self._session.get(url, headers={"X-API-Key": self._key})
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            raise TermometrWifiApiError(f"Błąd połączenia: {err}") from err
+        if resp.status == 404:
+            return None
+        if resp.status in (401, 403):
+            raise TermometrWifiAuthError("Brak uprawnień do zdjęcia")
+        if resp.status != 200:
+            raise TermometrWifiApiError(f"HTTP {resp.status}")
+        return await resp.read()
+
+    async def async_upload_run_photo(
+        self, run_id: int, which: str, content: bytes,
+        filename: str = "photo.jpg", content_type: str = "image/jpeg",
+    ) -> dict:
+        """Wysyła zdjęcie cyklu do analizy AI (multipart). which=start|product."""
+        url = f"{self._base}/ha/runs/{int(run_id)}/photo?which={which}"
+        form = aiohttp.FormData()
+        form.add_field("photo", content, filename=filename, content_type=content_type)
+        try:
+            async with asyncio.timeout(REQUEST_TIMEOUT):
+                resp = await self._session.post(url, headers={"X-API-Key": self._key}, data=form)
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            raise TermometrWifiApiError(f"Błąd połączenia: {err}") from err
+        if resp.status in (401, 403):
+            raise TermometrWifiAuthError("Brak uprawnień do wysłania zdjęcia")
+        try:
+            data = await resp.json()
+        except (aiohttp.ContentTypeError, ValueError):
+            data = {}
+        if resp.status != 200 or not data.get("ok", False):
+            raise TermometrWifiApiError(f"Upload odrzucony (HTTP {resp.status}): {data.get('error') or 'błąd'}")
+        return data
+
+    async def async_set_run_load(self, run_id: int, body: dict) -> dict:
+        """Ustawia masę/ilość/notatkę wsadu cyklu (POST /ha/runs/{id}/load)."""
+        return await self._post(f"ha/runs/{int(run_id)}/load", body)
+
+    async def async_push_weather(self, body: dict) -> dict:
+        """Wysyła lokalną pogodę z czujników HA (POST /ha/weather)."""
+        return await self._post("ha/weather", body)

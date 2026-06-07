@@ -46,6 +46,10 @@ i zrestartuj.
 | **Wędzarnia — sterowanie** | `number`: Cel komory/wsadu, Generator dymu, Wentylator 1/2, parametry programu WLASNY · `select`: Program · `switch`: Światło · `button`: Start/Stop |
 | Inne sterowniki — sensor per topic | wartość liczbowa → `measurement`; tekstowa → string. Atrybuty: `topic`, `last_seen` |
 | `binary_sensor` Alarm | ON gdy aktywny alarm; atrybuty: lista aktywnych alarmów (nazwa, ważność, czas) |
+| `binary_sensor` Łączność | connectivity — ON=online (z `SN/status` EMQX / LWT). Dostępny też offline (do automatyzacji) |
+| `sensor` Alarm — opis | **treść** alarmu (nazwa aktywnego lub `OK`); atrybuty: severity, lista `active`/`recent` |
+| `sensor` Ostatni cykl | program + status; atrybut `ai_feedback` (pełna analiza AI), wsad (`load_mass_kg`/`load_count`), `run_id` |
+| `image` Zdjęcie załadunku / wyrobu | zdjęcia ostatniego cyklu (ciągnięte kluczem API, serwowane lokalnie) |
 
 Diagnostyka firmware wędzarni (ZC, HZ, gamma, nastawy PID, limity TRIAC) jest **pomijana** — w HA
 pojawiają się tylko encje potrzebne i widoczne na karcie. Nowe wartości na sterownikach innych niż
@@ -73,6 +77,60 @@ wykres temperatur, pasek faz, postęp, chipy (grzałka/etap), kontrolki START/ST
 dym/wentylatory (lub przełączniki w trybie ONOFF), światło oraz edytor programu WLASNY (⚙). Sama
 wyszukuje encje urządzenia. Wykres rysuje się na żywo z kolejnych odpytań (rośnie w trakcie sesji).
 Po instalacji może być konieczne **odświeżenie przeglądarki** (Ctrl+F5), żeby HA wczytał nowy zasób.
+
+## Cykle, analiza AI i zdjęcia
+
+Integracja pobiera ostatnie cykle (`GET /ha/runs`): program, czasy, status, **analizę AI** (`ai_feedback`)
+oraz masę/ilość wsadu. Zdjęcia (załadunek/wyrób) ciągnie kluczem API i serwuje lokalnie jako encje `image`.
+
+**Usługi** (Narzędzia deweloperskie → Usługi lub w automatyzacjach):
+
+- `termometrwifi.upload_run_photo` — wyślij zdjęcie do analizy AI (jak w aplikacji). Źródło: `image_path`
+  (plik na HA) lub `camera_entity` (snapshot). `which: start|product`. Cel: `device_id` (najnowszy cykl) lub `run_id`.
+- `termometrwifi.set_load` — ustaw `mass_kg` / `count` / `note` wsadu (ekran startu w aplikacji).
+
+Przykładowa karta (analiza + zdjęcia):
+
+```yaml
+type: vertical-stack
+cards:
+  - type: markdown
+    content: >
+      ### Analiza AI
+      {{ state_attr('sensor.wedzarnia_ostatni_cykl', 'ai_feedback') or 'Brak analizy' }}
+  - type: picture-entity
+    entity: image.wedzarnia_zdjecie_wyrobu
+    show_state: false
+  - type: button
+    name: Wyślij zdjęcie z kamery do AI
+    tap_action:
+      action: call-service
+      service: termometrwifi.upload_run_photo
+      data: { which: product, camera_entity: camera.wedzarnia }
+      target: { device_id: <device_id_wedzarni> }
+```
+
+## Pogoda z lokalnych czujników (HA → APP)
+
+Zamiast pogody z API po lokalizacji, możesz wskazać własne czujniki HA — ich wartości trafią do
+aplikacji/analizy. *Ustawienia → Urządzenia i usługi → TermometrWifi → Konfiguruj*:
+
+- **Temperatura / Wilgotność / Wiatr** — encje `sensor.*` (wiatr w km/h).
+- Integracja wysyła je co ~10 min do backendu (`POST /ha/weather`); przypina je jako obserwację do
+  aktywnych cykli wędzenia. Worker **preferuje** te dane nad open-meteo, gdy są świeże (≤30 min);
+  gdy przestaną przychodzić — wraca do API (o ile ustawiono lokalizację).
+
+## Live powiadomienie wędzenia (telefon)
+
+Blueprint [`blueprints/automation/termometrwifi/live_smoking_notification.yaml`](blueprints/automation/termometrwifi/live_smoking_notification.yaml)
+tworzy powiadomienie aktualizujące się **w miejscu** (faza, komora, wsad, program) — jak żywy widok
+w aplikacji. Wymaga aplikacji mobilnej Home Assistant.
+
+1. *Ustawienia → Automatyzacje → Blueprinty → Importuj blueprint* (URL do pliku w repo) **lub** skopiuj
+   plik do `config/blueprints/automation/termometrwifi/`.
+2. Utwórz automatyzację z blueprintu: wskaż usługę powiadomień (`notify.mobile_app_…`) i encje
+   (komora/wsad/etap/status/program).
+3. Podczas wędzenia telefon pokazuje jedno, odświeżane powiadomienie; po STOP/KONIEC znika.
 
 ## Sterowanie — bezpieczeństwo
 

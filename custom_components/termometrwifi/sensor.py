@@ -80,6 +80,16 @@ async def async_setup_entry(
                         continue
                     known.add(uid)
                     new.append(TermometrWifiSensor(coordinator, sn, suffix))
+            # Sensor treści alarmu (nazwa/severity) — per sterownik, niezależnie od kategorii.
+            alarm_uid = f"{sn}::alarm_text"
+            if alarm_uid not in known:
+                known.add(alarm_uid)
+                new.append(TermometrWifiAlarmSensor(coordinator, sn))
+            # Sensor ostatniego cyklu (analiza AI + wsad) — per sterownik.
+            run_uid = f"{sn}::run"
+            if run_uid not in known:
+                known.add(run_uid)
+                new.append(TermometrWifiRunSensor(coordinator, sn))
         if new:
             async_add_entities(new)
 
@@ -133,6 +143,142 @@ class SmokerSensor(TermometrWifiSmokerEntity, SensorEntity):
             idx = to_number(self._raw())
             return {"index": int(idx) if idx is not None else None}
         return None
+
+
+def _alarms_for(coordinator, sn: str) -> list[dict]:
+    return (coordinator.data or {}).get("alarms", {}).get(sn, []) or []
+
+
+def _active_alarms(coordinator, sn: str) -> list[dict]:
+    return [
+        a for a in _alarms_for(coordinator, sn)
+        if int(a.get("value", 0)) == 1 and a.get("status") != "resolved"
+    ]
+
+
+class TermometrWifiAlarmSensor(CoordinatorEntity[TermometrWifiCoordinator], SensorEntity):
+    """Treść alarmu: nazwa aktywnego alarmu (lub 'OK'), z pełną listą w atrybutach.
+
+    Uzupełnia binary_sensor 'Alarm' (problem) — tu widać KONKRETNIE co się dzieje, nie tylko on/off.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Alarm — opis"
+
+    def __init__(self, coordinator: TermometrWifiCoordinator, sn: str) -> None:
+        super().__init__(coordinator)
+        self._sn = sn
+        self._attr_unique_id = f"{DOMAIN}_{sn}_alarm_text"
+
+    @property
+    def device_info(self):
+        return device_info(self.coordinator, self._sn)
+
+    @property
+    def icon(self) -> str:
+        active = _active_alarms(self.coordinator, self._sn)
+        if not active:
+            return "mdi:bell-check"
+        sev = (active[0].get("severity") or "").lower()
+        return "mdi:bell-alert" if sev in ("critical", "warning") else "mdi:bell-ring"
+
+    @property
+    def native_value(self):
+        active = _active_alarms(self.coordinator, self._sn)
+        if not active:
+            return "OK"
+        name = active[0].get("name") or "Alarm"
+        # Stan encji HA ma limit 255 znaków.
+        return str(name)[:255]
+
+    @property
+    def extra_state_attributes(self):
+        active = _active_alarms(self.coordinator, self._sn)
+        last = active[0] if active else None
+        return {
+            "active_count": len(active),
+            "severity": last.get("severity") if last else None,
+            "at": last.get("at") if last else None,
+            "temperature": last.get("temperature") if last else None,
+            "active": [
+                {
+                    "name": a.get("name"),
+                    "severity": a.get("severity"),
+                    "at": a.get("at"),
+                    "temperature": a.get("temperature"),
+                }
+                for a in active
+            ],
+            "recent": [
+                {
+                    "name": a.get("name"),
+                    "value": a.get("value"),
+                    "severity": a.get("severity"),
+                    "status": a.get("status"),
+                    "at": a.get("at"),
+                }
+                for a in _alarms_for(self.coordinator, self._sn)[:10]
+            ],
+        }
+
+
+class TermometrWifiRunSensor(CoordinatorEntity[TermometrWifiCoordinator], SensorEntity):
+    """Ostatni cykl: stan = program + status; atrybuty = analiza AI, wsad, flagi zdjęć, id.
+
+    Pełny tekst analizy AI pokażesz w karcie Markdown:
+        {{ state_attr('sensor.<dev>_ostatni_cykl', 'ai_feedback') }}
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Ostatni cykl"
+    _attr_icon = "mdi:robot"
+
+    def __init__(self, coordinator: TermometrWifiCoordinator, sn: str) -> None:
+        super().__init__(coordinator)
+        self._sn = sn
+        self._attr_unique_id = f"{DOMAIN}_{sn}_run"
+
+    @property
+    def device_info(self):
+        return device_info(self.coordinator, self._sn)
+
+    def _run(self) -> dict | None:
+        return self.coordinator.latest_run(self._sn)
+
+    @property
+    def native_value(self):
+        run = self._run()
+        if not run:
+            return "Brak"
+        prog = run.get("program") or "?"
+        status = run.get("status") or ""
+        if run.get("ai_pending"):
+            return f"{prog} · analiza…"
+        return f"{prog} · {status}" if status else str(prog)
+
+    @property
+    def extra_state_attributes(self):
+        run = self._run()
+        if not run:
+            return {"run_id": None}
+        return {
+            "run_id": run.get("id"),
+            "program": run.get("program"),
+            "status": run.get("status"),
+            "started_at": run.get("started_at"),
+            "finished_at": run.get("finished_at"),
+            "duration_s": run.get("duration_s"),
+            "ai_feedback": run.get("ai_feedback"),
+            "start_feedback": run.get("start_feedback"),
+            "ai_pending": run.get("ai_pending"),
+            "ask_photo": run.get("ask_photo"),
+            "has_photo": run.get("has_photo"),
+            "has_start_photo": run.get("has_start_photo"),
+            "load_mass_kg": run.get("load_mass_kg"),
+            "load_count": run.get("load_count"),
+            "load_note": run.get("load_note"),
+            "load_source": run.get("load_source"),
+        }
 
 
 class TermometrWifiSensor(CoordinatorEntity[TermometrWifiCoordinator], SensorEntity):

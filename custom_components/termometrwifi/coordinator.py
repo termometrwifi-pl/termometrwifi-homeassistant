@@ -56,7 +56,31 @@ class TermometrWifiCoordinator(DataUpdateCoordinator):
             if sn:
                 alarms_by_sn.setdefault(sn, []).append(alarm)
 
-        return {"devices": devices, "alarms": alarms_by_sn}
+        # Cykle (analiza AI + zdjęcia + wsad) — best-effort; błąd nie wywala całego cyklu.
+        runs: list = []
+        runs_by_sn: dict[str, dict] = {}
+        try:
+            runs = (await self.client.async_get_runs(limit=12)).get("runs", [])
+            for run in runs:
+                sn = run.get("sn")
+                if sn and sn not in runs_by_sn:  # lista posortowana malejąco → pierwszy = najnowszy
+                    runs_by_sn[sn] = run
+        except TermometrWifiApiError as err:
+            _LOGGER.debug("Pobranie cykli nie powiodło się: %s", err)
+            prev = self.data or {}
+            runs = prev.get("runs", [])
+            runs_by_sn = prev.get("runs_by_sn", {})
+
+        return {
+            "devices": devices,
+            "alarms": alarms_by_sn,
+            "runs": runs,
+            "runs_by_sn": runs_by_sn,
+        }
+
+    def latest_run(self, sn: str) -> dict | None:
+        """Najnowszy cykl danego sterownika (lub None)."""
+        return (self.data or {}).get("runs_by_sn", {}).get(sn)
 
     async def async_send_command(
         self, sn: str, suffix: str, payload: str, echo_suffix: str | None = None

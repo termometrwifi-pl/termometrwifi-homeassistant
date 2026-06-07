@@ -7,6 +7,12 @@ CONF_BASE_URL = "base_url"
 CONF_API_KEY = "api_key"
 CONF_SCAN_INTERVAL = "scan_interval"
 
+# Lokalne czujniki pogody (HA → APP): encje, których wartości wysyłamy zamiast API weather.
+CONF_WEATHER_TEMP = "weather_temp_entity"
+CONF_WEATHER_HUMIDITY = "weather_humidity_entity"
+CONF_WEATHER_WIND = "weather_wind_entity"
+WEATHER_PUSH_INTERVAL = 600  # sekundy — jak często wysyłać lokalną pogodę do backendu
+
 DEFAULT_BASE_URL = "https://termometrwifi.pl/wp-json/iot/v1"
 DEFAULT_SCAN_INTERVAL = 30  # sekundy — backstop; bieżące zmiany przychodzą realtime (MQTT-WS)
 MIN_SCAN_INTERVAL = 10

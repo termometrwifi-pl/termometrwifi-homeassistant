@@ -1,0 +1,105 @@
+blueprint:
+  name: TermometrWifi — Live powiadomienie wędzenia
+  description: >-
+    Powiadomienie na telefon (aplikacja Home Assistant) aktualizujące się W MIEJSCU podczas wędzenia —
+    pokazuje fazę, temperaturę komory i wsadu oraz program, tak jak żywy widok w aplikacji.
+    Używa stałego `tag`, więc kolejne aktualizacje nadpisują to samo powiadomienie. Po zakończeniu
+    cyklu (STOP/KONIEC) powiadomienie jest usuwane.
+  domain: automation
+  input:
+    notify_service:
+      name: Usługa powiadomień (telefon)
+      description: 'Np. notify.mobile_app_twoj_telefon'
+      selector:
+        text:
+    chamber_entity:
+      name: Encja — temperatura komory
+      selector:
+        entity:
+          domain: sensor
+    meat_entity:
+      name: Encja — temperatura wsadu
+      selector:
+        entity:
+          domain: sensor
+    phase_entity:
+      name: Encja — etap/faza
+      selector:
+        entity:
+          domain: sensor
+    status_entity:
+      name: Encja — status (STAT)
+      selector:
+        entity:
+          domain: sensor
+    program_entity:
+      name: Encja — program (opcjonalnie)
+      default: ""
+      selector:
+        entity:
+          domain: [sensor, select]
+    notification_tag:
+      name: Tag powiadomienia
+      description: Stały identyfikator — kolejne aktualizacje nadpisują to samo powiadomienie.
+      default: termometrwifi_smoking
+      selector:
+        text:
+
+mode: restart
+max_exceeded: silent
+
+trigger:
+  - platform: state
+    entity_id: !input chamber_entity
+  - platform: state
+    entity_id: !input meat_entity
+  - platform: state
+    entity_id: !input phase_entity
+  - platform: state
+    entity_id: !input status_entity
+  - platform: time_pattern
+    minutes: "/1"
+
+variables:
+  input_status: !input status_entity
+  v_chamber: !input chamber_entity
+  v_meat: !input meat_entity
+  v_phase: !input phase_entity
+  v_program_entity: !input program_entity
+  v_tag: !input notification_tag
+
+action:
+  - choose:
+      # Cykl zatrzymany/zakończony → usuń live powiadomienie.
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ (states(input_status) | lower) in ['stop','koniec','gotowe']
+                 or states(input_status) in ['unavailable','unknown',''] }}
+        sequence:
+          - service: !input notify_service
+            data:
+              message: clear_notification
+              data:
+                tag: "{{ v_tag }}"
+    # Domyślnie (wędzenie trwa) → aktualizuj powiadomienie.
+    default:
+      - variables:
+          program: "{{ states(v_program_entity) if v_program_entity else '' }}"
+          chamber: "{{ states(v_chamber) }}"
+          meat: "{{ states(v_meat) }}"
+          phase: "{{ states(v_phase) }}"
+      - service: !input notify_service
+        data:
+          title: "🔥 Wędzenie{{ ' — ' ~ program if program not in ['', 'unknown', 'unavailable'] else '' }}"
+          message: >-
+            Faza: {{ phase }} • Komora: {{ chamber }}°C • Wsad: {{ meat }}°C
+          data:
+            tag: "{{ v_tag }}"
+            group: termometrwifi
+            persistent: true
+            sticky: true
+            channel: Wędzenie
+            importance: high
+            color: "#10B981"
+            notification_icon: mdi:grill

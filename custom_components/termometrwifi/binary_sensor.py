@@ -5,6 +5,7 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -12,24 +13,25 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import TermometrWifiCoordinator
-from .entity import device_info
+from .entity import device_info, device_online, device_values
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Jeden binary_sensor 'Alarm' na każdy sterownik (dochodzą dynamicznie)."""
+    """Per sterownik: binary_sensor 'Alarm' (problem) + 'Łączność' (connectivity)."""
     coordinator: TermometrWifiCoordinator = hass.data[DOMAIN][entry.entry_id]
     known: set[str] = set()
 
     @callback
     def _discover() -> None:
-        new: list[TermometrWifiAlarmBinarySensor] = []
+        new: list[object] = []
         for sn in (coordinator.data or {}).get("devices", {}):
             if sn in known:
                 continue
             known.add(sn)
             new.append(TermometrWifiAlarmBinarySensor(coordinator, sn))
+            new.append(TermometrWifiConnectivityBinarySensor(coordinator, sn))
         if new:
             async_add_entities(new)
 
@@ -87,3 +89,32 @@ class TermometrWifiAlarmBinarySensor(
                 for a in active
             ],
         }
+
+
+class TermometrWifiConnectivityBinarySensor(
+    CoordinatorEntity[TermometrWifiCoordinator], BinarySensorEntity
+):
+    """ON gdy sterownik jest online (obecność z SN/status z EMQX; fallback LWT PUB/Czas).
+
+    Pozostaje DOSTĘPNY także offline — w przeciwieństwie do encji wędzarni, które gasną,
+    żeby nie pokazywać starych retained wartości. Dzięki temu nadaje się do automatyzacji
+    (np. powiadomienie, gdy wędzarnia padnie).
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Łączność"
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: TermometrWifiCoordinator, sn: str) -> None:
+        super().__init__(coordinator)
+        self._sn = sn
+        self._attr_unique_id = f"{DOMAIN}_{sn}_status"
+
+    @property
+    def device_info(self):
+        return device_info(self.coordinator, self._sn)
+
+    @property
+    def is_on(self) -> bool:
+        return device_online(device_values(self.coordinator, self._sn))

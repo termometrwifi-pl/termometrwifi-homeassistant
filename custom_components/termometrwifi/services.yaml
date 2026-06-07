@@ -1,0 +1,88 @@
+upload_run_photo:
+  name: Wyślij zdjęcie do analizy AI
+  description: >-
+    Wysyła zdjęcie do ostatniego cyklu wędzarni (jak w aplikacji) i uruchamia analizę AI.
+    Wskaż urządzenie (weźmie najnowszy cykl) lub konkretny run_id. Źródło zdjęcia: plik na HA
+    (image_path) albo encja kamery (camera_entity).
+  fields:
+    device_id:
+      name: Urządzenie
+      description: Sterownik (wędzarnia) — użyty zostanie jego najnowszy cykl.
+      required: false
+      selector:
+        device:
+          integration: termometrwifi
+    run_id:
+      name: ID cyklu
+      description: Konkretny cykl (zamiast urządzenia). Z atrybutu sensora „Ostatni cykl".
+      required: false
+      selector:
+        number:
+          min: 1
+          mode: box
+    which:
+      name: Rodzaj
+      description: Zdjęcie załadunku (start) czy wyrobu (product).
+      required: false
+      default: product
+      selector:
+        select:
+          options:
+            - value: start
+              label: Załadunek (start)
+            - value: product
+              label: Wyrób (koniec)
+    image_path:
+      name: Ścieżka pliku
+      description: Ścieżka do pliku obrazu dostępnego dla Home Assistant (jpg/png/webp).
+      required: false
+      selector:
+        text:
+    camera_entity:
+      name: Kamera
+      description: Encja kamery — zostanie zrobiony snapshot i wysłany do analizy.
+      required: false
+      selector:
+        entity:
+          domain: camera
+
+set_load:
+  name: Ustaw masę/ilość wsadu
+  description: >-
+    Ustawia masę (kg), ilość sztuk i notatkę wsadu dla ostatniego cyklu (ekran startu w aplikacji).
+  fields:
+    device_id:
+      name: Urządzenie
+      required: false
+      selector:
+        device:
+          integration: termometrwifi
+    run_id:
+      name: ID cyklu
+      required: false
+      selector:
+        number:
+          min: 1
+          mode: box
+    mass_kg:
+      name: Masa (kg)
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 500
+          step: 0.1
+          mode: box
+    count:
+      name: Ilość sztuk
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 999
+          mode: box
+    note:
+      name: Notatka
+      required: false
+      selector:
+        text:
