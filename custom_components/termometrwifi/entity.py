@@ -1,7 +1,6 @@
 """Wspólne helpery encji TermometrWifi."""
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
 
 from homeassistant.helpers.entity import DeviceInfo
@@ -83,49 +82,34 @@ def is_smoker(values: dict) -> bool:
     return any(resolve_suffix(values, m) is not None for m in SMOKER_MARKER_SUFFIXES)
 
 
-def _raw_value(values: dict, suffix: str):
-    key = resolve_suffix(values, suffix)
-    if key is None:
-        return None
-    entry = values.get(key)
-    return entry.get("v") if isinstance(entry, dict) else None
-
-
 def device_online(values: dict) -> bool:
-    """Czy sterownik jest online.
+    """Czy sterownik jest online — wyłącznie z realnego topiku obecności EMQX `status`.
 
-    MQTT jest retained → po rozłączeniu zostają nieaktualne wartości. Obecność wykrywamy:
-    1) z topiku obecności (EMQX/LWT) — DOWOLNY suffix kończący się na `status`
-       (np. `status`, `SUB/status`, `PUB/status`) o wartości online/offline/1/0,
-    2) z LWT firmware na `…/Czas` = "OFF LINE" (retained).
-    Brak sygnału = zakładamy online (jak dotąd).
+    Bierzemy DOWOLNY suffix kończący się na `status` (np. `status`, `SUB/status`) i jego NAJŚWIEŻSZĄ
+    wartość (największy ts): online/1 → online, offline/0 → offline. Gdy topiku brak — zakładamy
+    online (nie wygaszamy urządzeń, które nie publikują obecności).
     """
-    def _last_seg(key: str) -> str:
-        return key.rsplit("/", 1)[-1].lower()
+    raw, _key, _ts = presence_raw(values)
+    if raw is not None and raw.strip().lower() in ("offline", "off line", "off", "0", "false"):
+        return False
+    return True
 
-    # 1) Topic obecności — bierzemy najświeższy (największy ts) z kluczy *…/status.
+
+def presence_raw(values: dict):
+    """Najświeższa surowa wartość topiku obecności `…/status` → (wartość, klucz, ts) lub (None,…).
+
+    Diagnostyka: pozwala zobaczyć, co integracja faktycznie dostała z EMQX.
+    """
     best_ts = -1.0
-    best_val = None
+    best = (None, None, None)
     for key, entry in values.items():
-        if not isinstance(entry, dict) or _last_seg(key) != "status":
+        if not isinstance(entry, dict) or key.rsplit("/", 1)[-1].lower() != "status":
             continue
         ts = float(entry.get("ts") or 0)
         if ts >= best_ts:
             best_ts = ts
-            best_val = str(entry.get("v", "")).strip().lower()
-    if best_val is not None:
-        if best_val in ("offline", "off line", "off", "0", "false"):
-            return False
-        if best_val in ("online", "on", "1", "true"):
-            return True
-
-    # 2) LWT na …/Czas = "OFF LINE".
-    for key, entry in values.items():
-        if not isinstance(entry, dict) or _last_seg(key) != "czas":
-            continue
-        if re.search(r"off\s*line", str(entry.get("v", "")), re.IGNORECASE):
-            return False
-    return True
+            best = (str(entry.get("v", "")), key, entry.get("ts"))
+    return best
 
 
 class TermometrWifiSmokerEntity(CoordinatorEntity):

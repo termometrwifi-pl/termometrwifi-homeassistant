@@ -13,7 +13,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import TermometrWifiCoordinator
-from .entity import device_info, device_online, device_values
+from .entity import device_info, device_online, device_values, presence_raw, ts_to_iso
 
 
 async def async_setup_entry(
@@ -118,3 +118,13 @@ class TermometrWifiConnectivityBinarySensor(
     @property
     def is_on(self) -> bool:
         return device_online(device_values(self.coordinator, self._sn))
+
+    @property
+    def extra_state_attributes(self):
+        # Diagnostyka: surowa wartość topiku obecności, której HA faktycznie użyło.
+        raw, key, ts = presence_raw(device_values(self.coordinator, self._sn))
+        return {
+            "raw_status": raw,
+            "status_topic": key,
+            "status_last_seen": ts_to_iso(ts),
+        }
