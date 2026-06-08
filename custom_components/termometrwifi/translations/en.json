@@ -3,19 +3,32 @@
     "step": {
       "user": {
         "title": "TermometrWifi",
-        "description": "Enter the API address and the key generated in the app (Settings → Home Assistant).",
+        "description": "Enter the API key generated in the app (Settings → Home Assistant).",
         "data": {
-          "base_url": "API address",
           "api_key": "API key"
         }
       }
     },
     "error": {
-      "cannot_connect": "Cannot connect to the API. Check the address.",
+      "cannot_connect": "Cannot connect to the API. Please try again.",
       "invalid_auth": "Invalid or revoked API key."
     },
     "abort": {
       "already_configured": "This API key is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "TermometrWifi options",
+        "description": "Local weather sensors (HA → app) and polling interval.",
+        "data": {
+          "scan_interval": "Polling interval (s)",
+          "weather_temp_entity": "Temperature sensor",
+          "weather_humidity_entity": "Humidity sensor",
+          "weather_wind_entity": "Wind sensor (km/h)"
+        }
+      }
     }
   }
 }

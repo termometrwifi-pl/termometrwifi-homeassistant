@@ -32,9 +32,7 @@ i zrestartuj.
 ## Konfiguracja
 
 1. *Ustawienia → Urządzenia i usługi → Dodaj integrację → TermometrWifi*.
-2. Podaj:
-   - **Adres API**: `https://termometrwifi.pl/wp-json/iot/v1` (domyślne),
-   - **Klucz API**: skopiowany z aplikacji.
+2. Podaj **Klucz API** skopiowany z aplikacji (adres API jest ustawiany automatycznie).
 3. Integracja zweryfikuje klucz i utworzy urządzenia + encje.
 
 ## Co powstaje w HA

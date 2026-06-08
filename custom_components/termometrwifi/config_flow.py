@@ -44,7 +44,7 @@ class TermometrWifiConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            base_url = user_input[CONF_BASE_URL].strip()
+            base_url = DEFAULT_BASE_URL
             api_key = user_input[CONF_API_KEY].strip()
             client = TermometrWifiClient(
                 async_get_clientsession(self.hass), base_url, api_key
@@ -64,12 +64,7 @@ class TermometrWifiConfigFlow(ConfigFlow, domain=DOMAIN):
                     data={CONF_BASE_URL: base_url, CONF_API_KEY: api_key},
                 )
 
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_BASE_URL, default=DEFAULT_BASE_URL): str,
-                vol.Required(CONF_API_KEY): str,
-            }
-        )
+        schema = vol.Schema({vol.Required(CONF_API_KEY): str})
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
 
     @staticmethod

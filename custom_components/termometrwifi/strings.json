@@ -3,19 +3,32 @@
     "step": {
       "user": {
         "title": "TermometrWifi",
-        "description": "Podaj adres API i klucz wygenerowany w aplikacji (Ustawienia → Home Assistant).",
+        "description": "Podaj klucz API wygenerowany w aplikacji (Ustawienia → Home Assistant).",
         "data": {
-          "base_url": "Adres API",
           "api_key": "Klucz API"
         }
       }
     },
     "error": {
-      "cannot_connect": "Nie można połączyć się z API. Sprawdź adres.",
+      "cannot_connect": "Nie można połączyć się z API. Spróbuj ponownie.",
       "invalid_auth": "Nieprawidłowy lub odwołany klucz API."
     },
     "abort": {
       "already_configured": "Ten klucz API jest już skonfigurowany."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opcje TermometrWifi",
+        "description": "Lokalne czujniki pogody (HA → aplikacja) i interwał odpytywania.",
+        "data": {
+          "scan_interval": "Interwał odpytywania (s)",
+          "weather_temp_entity": "Czujnik temperatury",
+          "weather_humidity_entity": "Czujnik wilgotności",
+          "weather_wind_entity": "Czujnik wiatru (km/h)"
+        }
+      }
     }
   }
 }
