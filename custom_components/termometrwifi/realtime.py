@@ -103,25 +103,29 @@ class TermometrWifiRealtime:
         self._topics = list(creds.get("topics") or [])
 
         client_id = f"ha-{int(time.time() * 1000) & 0xFFFFFF}"
-        try:
-            c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id, transport="websockets")
-        except (AttributeError, TypeError):  # paho 1.x
-            c = mqtt.Client(client_id=client_id, transport="websockets")
-        c.ws_set_options(path=path)
-        if secure:
-            c.tls_set()
-        c.username_pw_set(creds.get("username"), creds.get("password"))
-        c.on_connect = self._on_connect
-        c.on_message = self._on_message
-        c.on_disconnect = self._on_disconnect
-        self._mqttc = c
+        username = creds.get("username")
+        password = creds.get("password")
 
-        def _start():
+        # Cała budowa klienta paho (Client(), tls_set, connect_async, loop_start) w EXECUTORZE —
+        # tls_set() ładuje certyfikaty systemowe (blokujące I/O), więc nie może być w pętli zdarzeń.
+        def _build_and_start():
+            try:
+                c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id, transport="websockets")
+            except (AttributeError, TypeError):  # paho 1.x
+                c = mqtt.Client(client_id=client_id, transport="websockets")
+            c.ws_set_options(path=path)
+            if secure:
+                c.tls_set()
+            c.username_pw_set(username, password)
+            c.on_connect = self._on_connect
+            c.on_message = self._on_message
+            c.on_disconnect = self._on_disconnect
             c.connect_async(host, port, keepalive=KEEPALIVE)
             c.loop_start()
+            return c
 
         try:
-            await self._hass.async_add_executor_job(_start)
+            self._mqttc = await self._hass.async_add_executor_job(_build_and_start)
         except Exception as err:  # noqa: BLE001
             _LOGGER.warning("Realtime: błąd połączenia (%s) — retry za %ss", err, RECONNECT_DELAY)
             self._schedule_retry()
@@ -153,11 +157,18 @@ class TermometrWifiRealtime:
 
     # ── Callbacki paho (wątek MQTT) — marshalujemy do pętli HA ──
     def _on_connect(self, client, *args) -> None:
+        # VERSION2: (client, userdata, flags, reason_code, properties); v1: (client, userdata, flags, rc)
+        rc = args[2] if len(args) >= 3 else None
+        ok = (rc is None) or (getattr(rc, "is_failure", None) is False) or (rc == 0)
+        if not ok:
+            _LOGGER.warning("Realtime: CONNACK niepowodzenie (rc=%s) — sprawdź broker/JWT", rc)
+            return
         for topic in self._topics:
             try:
                 client.subscribe(topic, qos=0)
             except Exception:  # noqa: BLE001
                 pass
+        _LOGGER.info("Realtime: połączono, subskrypcja %d topików: %s", len(self._topics), self._topics)
 
     def _on_message(self, client, userdata, msg, *args) -> None:
         try:
