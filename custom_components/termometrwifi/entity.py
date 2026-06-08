@@ -94,20 +94,37 @@ def _raw_value(values: dict, suffix: str):
 def device_online(values: dict) -> bool:
     """Czy sterownik jest online.
 
-    MQTT jest retained → po rozłączeniu zostają nieaktualne wartości. Obecność wykrywamy z LWT:
-    firmware ustawia Last Will na PUB/Czas = "OFF LINE" (retained). Dodatkowo honorujemy topic
-    `status` (online/offline/1/0), jeśli kiedyś się pojawi. Brak sygnału = zakładamy online.
+    MQTT jest retained → po rozłączeniu zostają nieaktualne wartości. Obecność wykrywamy:
+    1) z topiku obecności (EMQX/LWT) — DOWOLNY suffix kończący się na `status`
+       (np. `status`, `SUB/status`, `PUB/status`) o wartości online/offline/1/0,
+    2) z LWT firmware na `…/Czas` = "OFF LINE" (retained).
+    Brak sygnału = zakładamy online (jak dotąd).
     """
-    status = _raw_value(values, "status")
-    if status is not None:
-        s = str(status).strip().lower()
-        if s in ("offline", "off line", "off", "0", "false"):
+    def _last_seg(key: str) -> str:
+        return key.rsplit("/", 1)[-1].lower()
+
+    # 1) Topic obecności — bierzemy najświeższy (największy ts) z kluczy *…/status.
+    best_ts = -1.0
+    best_val = None
+    for key, entry in values.items():
+        if not isinstance(entry, dict) or _last_seg(key) != "status":
+            continue
+        ts = float(entry.get("ts") or 0)
+        if ts >= best_ts:
+            best_ts = ts
+            best_val = str(entry.get("v", "")).strip().lower()
+    if best_val is not None:
+        if best_val in ("offline", "off line", "off", "0", "false"):
             return False
-        if s in ("online", "on", "1", "true"):
+        if best_val in ("online", "on", "1", "true"):
             return True
-    czas = _raw_value(values, "PUB/Czas")
-    if czas is not None and re.search(r"off\s*line", str(czas), re.IGNORECASE):
-        return False
+
+    # 2) LWT na …/Czas = "OFF LINE".
+    for key, entry in values.items():
+        if not isinstance(entry, dict) or _last_seg(key) != "czas":
+            continue
+        if re.search(r"off\s*line", str(entry.get("v", "")), re.IGNORECASE):
+            return False
     return True
 
 
