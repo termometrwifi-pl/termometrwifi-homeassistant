@@ -37,6 +37,10 @@ class TermometrWifiCoordinator(DataUpdateCoordinator):
         self.client = client
         self.entry = entry
         self._rt_flush_cancel = None
+        # Wartości z kanału realtime (MQTT-WS), które API NIE zwraca — np. obecność `<sn>/status`
+        # z EMQX. Trzymamy je tu trwale (sn → {suffix: {v, ts}}), bo polling przebudowuje `devices`
+        # od zera i bez tego kasowałby push (broker wysyła retained tylko raz, przy subskrypcji).
+        self._rt_values: dict[str, dict] = {}
 
     async def _async_update_data(self) -> dict:
         try:
@@ -70,6 +74,18 @@ class TermometrWifiCoordinator(DataUpdateCoordinator):
             prev = self.data or {}
             runs = prev.get("runs", [])
             runs_by_sn = prev.get("runs_by_sn", {})
+
+        # Re-aplikuj wartości push (realtime). Polling przebudował `devices` od zera z API, które
+        # NIE zawiera obecności `<sn>/status` (EMQX) — bez tego status znikałby co poll. Aplikujemy
+        # tylko klucze nieobecne w danych z API, żeby świeży poll miał pierwszeństwo nad echem push.
+        for sn, rt in self._rt_values.items():
+            dev = devices.get(sn)
+            if not dev:
+                continue
+            values = dev.setdefault("values", {})
+            for key, entry in rt.items():
+                if resolve_suffix(values, key) is None:
+                    values[key] = entry
 
         return {
             "devices": devices,
@@ -111,14 +127,18 @@ class TermometrWifiCoordinator(DataUpdateCoordinator):
     @callback
     def realtime_update(self, sn: str, suffix: str, value: str) -> None:
         """Wartość z kanału realtime (MQTT-WS) → lokalny stan + odroczone powiadomienie encji."""
+        entry = {"v": str(value), "ts": int(time.time())}
+        # Zapamiętaj push trwale — polling zaraz przebuduje `devices` z API (bez wartości push),
+        # więc bez tego retained status (dostarczany przez brokera raz, przy subskrypcji) by zniknął.
+        self._rt_values.setdefault(sn, {})[suffix] = entry
         if not self.data:
             return
         dev = self.data.get("devices", {}).get(sn)
         if not dev:
-            return  # urządzenie pojawi się przy najbliższym pollingu
+            return  # urządzenie pojawi się przy najbliższym pollingu (push doczeka w _rt_values)
         values = dev.setdefault("values", {})
         actual = resolve_suffix(values, suffix) or suffix
-        values[actual] = {"v": str(value), "ts": int(time.time())}
+        values[actual] = entry
         # Debounce: firmware publikuje wiele topików naraz — scalamy w jedno powiadomienie.
         if self._rt_flush_cancel is None:
             self._rt_flush_cancel = async_call_later(self.hass, 0.3, self._rt_flush)

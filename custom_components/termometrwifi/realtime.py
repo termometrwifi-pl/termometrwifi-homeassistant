@@ -179,6 +179,8 @@ class TermometrWifiRealtime:
         sn, _, suffix = topic.partition("/")
         if not suffix:
             return
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug("Realtime RX %s = %s", topic, payload[:60])
         # realtime_update jest @callback (sync) — add_job uruchomi go bezpiecznie w pętli HA.
         self._hass.add_job(self._coordinator.realtime_update, sn, suffix, payload)
 
