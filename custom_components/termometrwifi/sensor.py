@@ -48,6 +48,10 @@ _SMOKER_HANDLED = {s[0].lower() for s in SMOKER_SENSORS} | {
     "pub/trw", "pub/tsw", "pub/tww", "pub/tpw", "pub/twmw",
 }
 
+# Techniczne topiki, z których NIE tworzymy encji (heartbeat itp.) — porównanie po ostatnim
+# segmencie, bez wielkości liter (np. "ping", "PUB/ping").
+_SKIP_LAST_SEGMENTS = {"ping"}
+
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
@@ -75,6 +79,8 @@ async def async_setup_entry(
             else:
                 # Fallback: dotychczasowe dynamiczne sensory per topic dla nie-wędzarni.
                 for suffix in values:
+                    if suffix.rsplit("/", 1)[-1].lower() in _SKIP_LAST_SEGMENTS:
+                        continue  # pomijamy techniczne topiki (np. ping) — nie pokazujemy ich
                     uid = f"{sn}::raw::{suffix}"
                     if uid in known:
                         continue
