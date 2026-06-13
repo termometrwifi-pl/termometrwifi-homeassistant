@@ -76,6 +76,27 @@ dym/wentylatory (lub przełączniki w trybie ONOFF), światło oraz edytor progr
 wyszukuje encje urządzenia. Wykres rysuje się na żywo z kolejnych odpytań (rośnie w trakcie sesji).
 Po instalacji może być konieczne **odświeżenie przeglądarki** (Ctrl+F5), żeby HA wczytał nowy zasób.
 
+## Karta Lovelace „Kocioł CO" (piec)
+
+Dla sterowników kotła CO (firmware piecv2) integracja rejestruje drugą kartę — wygląd **1:1** z aplikacji:
+
+```yaml
+type: custom:termometrwifi-piec-card
+# device_id: opcjonalnie — domyślnie pierwszy sterownik z topikami pieca
+# sn: opcjonalnie — wskazanie sterownika numerem seryjnym
+accent_color: "#F97316"   # opcjonalny kolor akcentu (domyślnie pomarańcz)
+title: Kocioł CO          # opcjonalny tytuł
+```
+
+Karta vendoruje oryginalny widget z aplikacji (`widget-piec.js`): **schemat hydrauliczny** (kocioł,
+płomień, komin ze spalinami, pompa CO, manometr, podajnik/zasobnik), **pasek statusu** (faza · alarmy ·
+serwis), **suwak nastawy CO**, **wykres temperatur**, **zasobnik paliwa**, **zużycie 7 dni** oraz panel
+**ustawień** (tryb letni, koszt paliwa, krzywa grzewcza, kalibracja czujników, harmonogramy — lokalnie).
+
+Dane czyta z surowych sensorów sterownika (encje per-topic, mapowane po sufiksie topiku → `sn/<suffix>`).
+Sterowanie (nastawa, tryb letni, dorzucenie paliwa) publikuje przez usługę `termometrwifi.send_command`.
+Po instalacji może być konieczne **odświeżenie przeglądarki** (Ctrl+F5), żeby HA wczytał nowy zasób.
+
 ## Cykle, analiza AI i zdjęcia
 
 Integracja pobiera ostatnie cykle (`GET /ha/runs`): program, czasy, status, **analizę AI** (`ai_feedback`)
@@ -86,6 +107,8 @@ oraz masę/ilość wsadu. Zdjęcia (załadunek/wyrób) ciągnie kluczem API i se
 - `termometrwifi.upload_run_photo` — wyślij zdjęcie do analizy AI (jak w aplikacji). Źródło: `image_path`
   (plik na HA) lub `camera_entity` (snapshot). `which: start|product`. Cel: `device_id` (najnowszy cykl) lub `run_id`.
 - `termometrwifi.set_load` — ustaw `mass_kg` / `count` / `note` wsadu (ekran startu w aplikacji).
+- `termometrwifi.send_command` — wyślij surową komendę na sterownik (`SN/{suffix}`). Cel: `device_id`
+  lub `sn`. Np. `suffix: cmd/nastaw`, `payload: "65"`. Używana przez kartę kotła CO do nastaw.
 
 Przykładowa karta (analiza + zdjęcia):
 

@@ -22,6 +22,7 @@ _LOGGER = logging.getLogger(__name__)
 
 SERVICE_UPLOAD_PHOTO = "upload_run_photo"
 SERVICE_SET_LOAD = "set_load"
+SERVICE_SEND_COMMAND = "send_command"
 
 _CONTENT_TYPES = {
     ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp",
@@ -44,6 +45,17 @@ _LOAD_SCHEMA = vol.Schema(
         vol.Optional("mass_kg"): vol.Coerce(float),
         vol.Optional("count"): vol.Coerce(int),
         vol.Optional("note"): cv.string,
+    }
+)
+
+# Generyczna komenda sterująca (publikacja na SN/{suffix}). Używana m.in. przez kartę kotła CO,
+# która — w odróżnieniu od wędzarni — nie ma encji number/switch i publikuje cmd/* bezpośrednio.
+_COMMAND_SCHEMA = vol.Schema(
+    {
+        vol.Exclusive("device_id", "target"): vol.Any(cv.string, [cv.string]),
+        vol.Exclusive("sn", "target"): cv.string,
+        vol.Required("suffix"): cv.string,
+        vol.Required("payload"): cv.string,
     }
 )
 
@@ -141,11 +153,26 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         await coordinator.client.async_set_run_load(run_id, body)
         await coordinator.async_request_refresh()
 
+    async def _send_command(call: ServiceCall) -> None:
+        coords = _coordinators(hass)
+        if not coords:
+            raise HomeAssistantError("Brak skonfigurowanej integracji TermometrWifi.")
+        sn = call.data.get("sn") or _sn_from_device(hass, call.data.get("device_id"))
+        if not sn:
+            raise HomeAssistantError("Podaj device_id lub sn sterownika.")
+        # Sterownik może należeć do dowolnego wpisu — wybierz koordynator, który go zna.
+        coordinator = next(
+            (c for c in coords if sn in (c.data or {}).get("devices", {})), coords[0]
+        )
+        await coordinator.async_send_command(sn, call.data["suffix"], call.data["payload"])
+
     hass.services.async_register(DOMAIN, SERVICE_UPLOAD_PHOTO, _upload, schema=_UPLOAD_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_SET_LOAD, _set_load, schema=_LOAD_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_SEND_COMMAND, _send_command, schema=_COMMAND_SCHEMA)
 
 
 def async_unload_services(hass: HomeAssistant) -> None:
     if not _coordinators(hass):
         hass.services.async_remove(DOMAIN, SERVICE_UPLOAD_PHOTO)
         hass.services.async_remove(DOMAIN, SERVICE_SET_LOAD)
+        hass.services.async_remove(DOMAIN, SERVICE_SEND_COMMAND)

@@ -86,3 +86,35 @@ set_load:
       required: false
       selector:
         text:
+
+send_command:
+  name: Wyślij komendę sterującą
+  description: >-
+    Publikuje surową komendę na sterownik (SN/{suffix}). Używana przez kartę kotła CO do nastaw
+    (np. suffix „cmd/nastaw", payload „65"). Wskaż urządzenie albo numer seryjny.
+  fields:
+    device_id:
+      name: Urządzenie
+      description: Sterownik docelowy. Pomiń, jeśli podajesz numer seryjny (sn).
+      required: false
+      selector:
+        device:
+          integration: termometrwifi
+    sn:
+      name: Numer seryjny
+      description: Numer seryjny sterownika (alternatywa dla device_id).
+      required: false
+      selector:
+        text:
+    suffix:
+      name: Topic (suffix)
+      description: Sufiks topiku komendy, np. „cmd/nastaw", „cmd/tryb_letni".
+      required: true
+      selector:
+        text:
+    payload:
+      name: Wartość
+      description: Treść komendy, np. „65", „ON".
+      required: true
+      selector:
+        text:

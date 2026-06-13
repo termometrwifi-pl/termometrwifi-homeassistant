@@ -38,12 +38,10 @@ PLATFORMS: list[Platform] = [
 ]
 
 # Pliki frontendu serwowane z integracji (auto-rejestrowane jako zasoby — bez ręcznego dodawania URL):
-#  - karta Lovelace (ładowana na wszystkich dashboardach),
-#  - vendorowany widget z aplikacji (styl "modern"; kartę doładowuje sama na żądanie).
-CARD_FILENAME = "termometrwifi-smoker-card.js"
-WIDGET_FILENAME = "widget-smoker.js"
-CARD_URL = f"/{DOMAIN}/{CARD_FILENAME}"
-WIDGET_URL = f"/{DOMAIN}/{WIDGET_FILENAME}"
+#  - karty Lovelace (ładowane na wszystkich dashboardach): wędzarnia + kocioł CO,
+#  - vendorowane widgety z aplikacji (wygląd 1:1; karty doładowują je na żądanie).
+CARD_FILENAMES = ("termometrwifi-smoker-card.js", "termometrwifi-piec-card.js")
+WIDGET_FILENAMES = ("widget-smoker.js", "widget-piec.js")
 
 
 def _cache_bust_token() -> str:
@@ -54,7 +52,7 @@ def _cache_bust_token() -> str:
     """
     base = os.path.join(os.path.dirname(__file__), "www")
     newest = 0.0
-    for name in (CARD_FILENAME, WIDGET_FILENAME):
+    for name in (*CARD_FILENAMES, *WIDGET_FILENAMES):
         try:
             newest = max(newest, os.path.getmtime(os.path.join(base, name)))
         except OSError:
@@ -72,47 +70,62 @@ def _read_version() -> str:
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:
-    """Serwuje pliki karty + widgetu i ładuje kartę na wszystkich dashboardach."""
-    if hass.data.get(f"{DOMAIN}_card_registered"):
-        return
+    """Serwuje pliki kart + widgetów i ładuje karty na wszystkich dashboardach.
+
+    Ścieżki statyczne rejestrujemy raz na proces (ponowna rejestracja tego samego URL-a rzuca),
+    ale rejestrację zasobów Lovelace uruchamiamy przy każdym setupie — jest idempotentna i dzięki
+    temu przeładowanie integracji (bez pełnego restartu HA) też dorejestruje nowe karty.
+    """
     base = os.path.join(os.path.dirname(__file__), "www")
-    files = [(CARD_URL, CARD_FILENAME), (WIDGET_URL, WIDGET_FILENAME)]
-    paths = []
-    for url, name in files:
+
+    if not hass.data.get(f"{DOMAIN}_static_registered"):
+        paths = []
+        for name in (*CARD_FILENAMES, *WIDGET_FILENAMES):
+            full = os.path.join(base, name)
+            if not os.path.isfile(full):
+                _LOGGER.warning("Nie znaleziono pliku frontendu: %s", full)
+                continue
+            paths.append((f"/{DOMAIN}/{name}", full))
+        try:
+            from homeassistant.components.http import StaticPathConfig
+
+            await hass.http.async_register_static_paths(
+                [StaticPathConfig(url, full, cache_headers=False) for url, full in paths]
+            )
+        except (ImportError, AttributeError):  # starsze wersje HA
+            for url, full in paths:
+                hass.http.register_static_path(url, full, cache_headers=False)
+        hass.data[f"{DOMAIN}_static_registered"] = True
+
+    # Cache-busting: token (mtime plików) w query wymusza pobranie świeżego JS po zmianie kart.
+    token = await hass.async_add_executor_job(_cache_bust_token)
+
+    # Ładujemy każdą kartę osobno (każda sama doładowuje swój widget na żądanie).
+    for name in CARD_FILENAMES:
         full = os.path.join(base, name)
         if not os.path.isfile(full):
-            _LOGGER.warning("Nie znaleziono pliku frontendu: %s", full)
             continue
-        paths.append((url, full))
-
-    try:
-        from homeassistant.components.http import StaticPathConfig
-
-        await hass.http.async_register_static_paths(
-            [StaticPathConfig(url, full, cache_headers=False) for url, full in paths]
-        )
-    except (ImportError, AttributeError):  # starsze wersje HA
-        for url, full in paths:
-            hass.http.register_static_path(url, full, cache_headers=False)
-
-    # Cache-busting: token (mtime plików) w query wymusza pobranie świeżego JS po zmianie karty.
-    token = await hass.async_add_executor_job(_cache_bust_token)
-    versioned = f"{CARD_URL}?v={token}"
-
-    # Preferujemy prawdziwy zasób Lovelace (widoczny w UI, niezawodny na aplikacji mobilnej).
-    # Gdy się nie uda (tryb YAML / brak kolekcji) — fallback na add_extra_js_url.
-    registered = await _async_register_lovelace_resource(hass, versioned)
-    if not registered:
-        try:
-            add_extra_js_url(hass, versioned)
-            _LOGGER.info("Karta TermometrWifi załadowana przez add_extra_js_url (%s).", versioned)
-        except Exception:  # noqa: BLE001 — rejestracja zasobu nie może wywalić setupu
-            _LOGGER.warning("Nie udało się zarejestrować zasobu karty: %s", versioned)
-
-    hass.data[f"{DOMAIN}_card_registered"] = True
+        versioned = f"/{DOMAIN}/{name}?v={token}"
+        # Preferujemy prawdziwy zasób Lovelace (widoczny w UI, niezawodny na aplikacji mobilnej).
+        # Gdy się nie uda (tryb YAML / brak kolekcji) — fallback na add_extra_js_url.
+        registered = await _async_register_lovelace_resource(hass, name, versioned)
+        if not registered:
+            # Tryb YAML / brak kolekcji zasobów — fallback. add_extra_js_url dopisuje do listy,
+            # więc robimy to najwyżej raz na proces dla danej karty (inaczej dublowałoby wpis).
+            done = hass.data.setdefault(f"{DOMAIN}_extra_js", set())
+            if name in done:
+                continue
+            try:
+                add_extra_js_url(hass, versioned)
+                done.add(name)
+                _LOGGER.info("Karta TermometrWifi załadowana przez add_extra_js_url (%s).", versioned)
+            except Exception:  # noqa: BLE001 — rejestracja zasobu nie może wywalić setupu
+                _LOGGER.warning("Nie udało się zarejestrować zasobu karty: %s", versioned)
 
 
-async def _async_register_lovelace_resource(hass: HomeAssistant, versioned_url: str) -> bool:
+async def _async_register_lovelace_resource(
+    hass: HomeAssistant, card_filename: str, versioned_url: str
+) -> bool:
     """Rejestruje kartę jako zasób Lovelace (res_type=module). True gdy obsłużone.
 
     Działa tylko w trybie storage (dashboardy zarządzane z UI). W trybie YAML zwraca False —
@@ -131,7 +144,7 @@ async def _async_register_lovelace_resource(hass: HomeAssistant, versioned_url: 
             resources.loaded = True
         for item in resources.async_items():
             url = str(item.get("url", ""))
-            if url.split("?")[0].endswith(CARD_FILENAME):
+            if url.split("?")[0].endswith(card_filename):
                 if url != versioned_url:  # podbij token przy zmianie pliku
                     await resources.async_update_item(item["id"], {"url": versioned_url})
                     _LOGGER.info("Zaktualizowano zasób karty TermometrWifi → %s", versioned_url)
