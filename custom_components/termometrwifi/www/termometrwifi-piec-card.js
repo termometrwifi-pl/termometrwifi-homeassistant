@@ -189,16 +189,25 @@
       return id ? this._hass.states[id] : null;
     }
 
-    // Czy sterownik online — z dowolnej encji pieca (unavailable/unknown = offline).
-    _online() {
-      for (const m of PIEC_MARKERS) {
-        const s = this._stateObj(m);
-        if (s) return !(s.state === "unavailable" || s.state === "unknown");
-      }
-      // brak markera — sprawdź jakąkolwiek encję
+    _isStatusSuffix(suffix) {
+      return suffix.split("/").pop().toLowerCase() === "status";
+    }
+    _avail(s) { return s && s.state !== "unavailable" && s.state !== "unknown"; }
+
+    // Surowa wartość obecności z topiku `…/status` (EMQX) — online/offline/1/0 — lub null gdy brak.
+    _presenceVal() {
       for (const suf in this._map) {
+        if (!this._isStatusSuffix(suf)) continue;
         const s = this._stateObj(suf);
-        if (s) return !(s.state === "unavailable" || s.state === "unknown");
+        if (this._avail(s)) return String(s.state);
+      }
+      return null;
+    }
+    // Czy płyną jakiekolwiek dane (przynajmniej jedna encja z realną wartością).
+    _hasData() {
+      for (const suf in this._map) {
+        if (this._isStatusSuffix(suf)) continue;
+        if (this._avail(this._stateObj(suf))) return true;
       }
       return false;
     }
@@ -213,13 +222,15 @@
         this._last[topic] = val;
         (this._subs[topic] || []).forEach((cb) => { try { cb(val); } catch (e) {} });
       };
-      fire(sn + "/status", this._online() ? "online" : "offline");
+      // Obecność: preferuj topik `…/status`; gdy go brak — online, jeśli płyną dane (surowe sensory
+      // pieca nie są oznaczane jako unavailable po offline, więc nie zgadujemy offline z ich braku).
+      const presence = this._presenceVal();
+      fire(sn + "/status", presence != null ? presence : (this._hasData() ? "online" : "offline"));
       for (const suffix in this._map) {
+        if (this._isStatusSuffix(suffix)) continue;   // obsłużone wyżej jako sn/status
         const s = this._stateObj(suffix);
-        if (!s) continue;
-        const v = String(s.state);
-        if (v === "unavailable" || v === "unknown") continue;
-        fire(sn + "/" + suffix, v);
+        if (!this._avail(s)) continue;
+        fire(sn + "/" + suffix, String(s.state));
       }
     }
 
